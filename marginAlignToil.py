@@ -41,20 +41,20 @@ def cullFilesToLocal(job, fileIds_to_get):
     return file_dict, work_dir
 
 
-def bwa_docker_call(job, reference_file_id, reads_file_id, 
-                    debug=True, 
-                    memory="10M", cores=1, disk="10M", 
-                    bwa_docker_image="quay.io/ucsc_cgl/bwa"):
+def bwa_index_docker_call(job, reference_file_id,
+                          debug=True, 
+                          memory="10M", cores=1, disk="10M", 
+                          bwa_docker_image="quay.io/ucsc_cgl/bwa"):
     # type: (toil.job.Job, string, string, 
     #        bool, 
     #        string, int, string, 
     #        string)
-    """Calls BWA through docker. Builds all required indices (crufty files) that BWA needs and 
+    """Builds all required indices (crufty files) that BWA needs and 
     imports them into the fileStore
     """
     # function variables
     DockerDir = "/data/"
-    BwaReferenceFiles = [reference_file_id, reads_file_id]
+    BwaReferenceFiles = [reference_file_id]
     
     def _get_unique_filename(file_id):
         return file_path_dict[file_id][1]
@@ -98,8 +98,8 @@ def bwa_docker_call(job, reference_file_id, reads_file_id,
         return new_ids
 
     # get a local copy of the reference and reads files for docker
-    file_path_dict, work_dir = cullFilesToLocal(job, [reference_file_id, reads_file_id])
-    assert(len(file_path_dict) == 2)
+    file_path_dict, work_dir = cullFilesToLocal(job, BwaReferenceFiles)
+    assert(len(file_path_dict) == 1)
     
     if debug:
         for k in file_path_dict:
@@ -108,9 +108,23 @@ def bwa_docker_call(job, reference_file_id, reads_file_id,
     
     # arguments for the bwa indexing and alignment
     dkr_reference_path   = DockerDir + _get_unique_filename(reference_file_id)
-    BwaReferenceFiles += _run_bwa_index() 
+    BwaReferenceFiles += _run_bwa_index()
+    return BwaReferenceFiles
 
-    return
+
+def bwa_docker_align(job, reference_id_pack, reads_file_id, 
+                     bwa_docker_image="quay.io/ucsc_cgl/bwa"):
+    job.fileStore.logToMaster("BWA reference id pack {}".format(reference_id_pack.__str__())) 
+
+
+
+def bwa_docker_alignment_root(job, reference_file_id, reads_file_id, 
+                              debug=True, 
+                              memory="10M", cores=1, disk="10M", 
+                              bwa_docker_image="quay.io/ucsc_cgl/bwa"):
+    BwaRefIdPack = job.addChildJobFn(bwa_index_docker_call, reference_file_id).rv()
+    job.addFollowOnJobFn(bwa_docker_align, BwaRefIdPack, reads_file_id)
+    return 
 
 
 def main():
@@ -130,7 +144,7 @@ def main():
             query_import_string = "file://{abs_path}".format(abs_path=os.path.abspath(args.reads))
             reference_file_id   = toil.importFile(ref_import_string)
             query_file_id       = toil.importFile(query_import_string)
-            root_job            = Job.wrapJobFn(bwa_docker_call, reference_file_id, query_file_id)
+            root_job            = Job.wrapJobFn(bwa_docker_alignment_root, reference_file_id, query_file_id)
             return toil.start(root_job)
         else:
             toil.restart()
