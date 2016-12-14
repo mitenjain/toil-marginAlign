@@ -102,10 +102,8 @@ def bwa_index_docker_call(job, bwa_fileId_map,
         new_ids        = [job.fileStore.importFile(x) for x in bwa_index_urls]
         
         # make a map of suffix files to their file Id
-        index_fileId_map = {}
-        for suffix, fId in izip(bwa_index_file_suffixes(), new_ids):
-            index_fileId_map[suffix] = fId
-        
+        index_fileId_map = dict([(suf, fid) for suf, fid in izip(bwa_index_file_suffixes(), new_ids)])
+
         # remove the local files
         removed = localFiles.safeLocalDelete(bwa_index_urls)
         
