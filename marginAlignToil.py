@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from toil.job import Job
 from toil.common import Toil
 from margin.toil.bwa import bwa_docker_alignment_root
-from margin.toil.alignment import chainSamFile
+from margin.toil.chainAlignment import chainSamFile
 
 DEBUG = True
 
@@ -16,7 +16,7 @@ def bwaAlignJobFunction(job, config):
     """
     bwa_alignment_job = job.addChildJobFn(bwa_docker_alignment_root, config)
 
-    if bwa_alignment_job is None:  # we're done
+    if bwa_alignment_job is None or config["no_chain"]:  # we're done
         return 
 
     job.addFollowOnJobFn(chainSamFileJobFunction, config, bwa_alignment_job.rv())
@@ -34,9 +34,17 @@ def chainSamFileJobFunction(job, config, bwa_output_map):
                                                                          reads=reads))
 
     chainSamFile(samFile=samFile, outputSamFile=outputSam, readFastqFile=reads, referenceFastaFile=reference)
-    chainedSam = job.fileStore.importFile("file://" + outputSam)
-    job.fileStore.exportFile(chainedSam, config["output_sam_path"])
+    chainedSamFileId = job.fileStore.importFile("file://" + outputSam)
+    job.addFollowOnJobFn(reAlignSamFileJobFunction, config, 
+                         {"chained_alignment_FileStoreID": chainedSamFileId})
+    
 
+def reAlignSamFileJobFunction(job, config, chain_alignment_output):
+    if config["no_realign"]:
+        job.fileStore.exportFile(chain_alignment_output["chained_alignment_FileStoreID"], 
+                                 config["output_sam_path"])
+    
+    
 
 def main():
     def parse_args():
