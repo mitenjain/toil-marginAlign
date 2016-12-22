@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+"""CI and unit tests for toil-marginAlign
+"""
 import unittest
 import subprocess
 import os
@@ -5,7 +8,7 @@ import pysam
 from itertools import izip
 
 
-class TestCase(unittest.TestCase):
+class ToilMarginAlignCiTest(unittest.TestCase):
     @staticmethod
     def initialize(test_sam_file, correct_sam_file):
         assert(os.path.exists(correct_sam_file))
@@ -20,6 +23,12 @@ class TestCase(unittest.TestCase):
         else:
             pass
         return
+
+    @staticmethod
+    def toil_clean(job_store):
+        cmd = "toil clean {}/".format(job_store)
+        subprocess.check_call(cmd.split())
+
 
     def check_sam_files(self, observed_sam, expected_sam):
         self.assertTrue(os.path.exists(expected_sam))
@@ -41,8 +50,11 @@ class TestCase(unittest.TestCase):
                   "-r ./tests/references.fa -q ./tests/reads.fq "\
                   "-o {test_sam} --workDir={cwd} --logInfo --no_chain".format(cwd=os.getcwd(),
                                                                               test_sam=test_sam_file)
-
-        subprocess.check_call(command.split())
+        try:
+            subprocess.check_call(command.split())
+        except subprocess.CalledProcessError:
+            self.toil_clean("jobstore")
+            self.assertTrue(False)
 
         # test that the AlignedRegions in the observed and expected are the same
         self.check_sam_files(test_sam_file, correct_sam_file)
@@ -59,8 +71,33 @@ class TestCase(unittest.TestCase):
                   "-r ./tests/references.fa -q ./tests/reads.fq "\
                   "-o {test_sam} --workDir={cwd} --logInfo --no_realign".format(cwd=os.getcwd(),
                                                                                 test_sam=test_sam_file)
+        try:
+            subprocess.check_call(command.split())
+        except subprocess.CalledProcessError:
+            self.toil_clean("jobstore")
+            self.assertTrue(False)
 
-        subprocess.check_call(command.split())
+        self.check_sam_files(test_sam_file, correct_sam_file)
+
+        self.clean_up(test_sam_file)
+
+    def test_bwa_realign(self):
+        test_sam_file    = "./tests/TESTSAM.sam"
+        correct_sam_file = "./tests/bwa_realigned.sam"
+
+        self.initialize(test_sam_file, correct_sam_file)
+
+        command = "python marginAlignToil.py file:jobstore "\
+                  "-r ./tests/references.fa -q ./tests/reads.fq "\
+                  "-o {test_sam} --workDir={cwd} --logInfo "\
+                  "--hmm ../marginAlign/src/margin/mappers/last_hmm_20.txt".format(cwd=os.getcwd(),
+                                                                                   test_sam=test_sam_file)
+
+        try:
+            subprocess.check_call(command.split())
+        except subprocess.CalledProcessError:
+            self.toil_clean("jobstore")
+            self.assertTrue(False)
 
         self.check_sam_files(test_sam_file, correct_sam_file)
 
@@ -68,7 +105,13 @@ class TestCase(unittest.TestCase):
 
 
 def main():
-    unittest.main()
+    testSuite = unittest.TestSuite()
+    testSuite.addTest(ToilMarginAlignCiTest("test_bwa"))
+    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_chained"))
+    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign"))
+    testRunner = unittest.TextTestRunner(verbosity=2)
+    testRunner.run(testSuite)
+
 
 if __name__ == '__main__':
     main()

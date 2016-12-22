@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+"""Toil script to run marginAlign nanopore analysis
+"""
 from __future__ import print_function
 import os
 from argparse import ArgumentParser
