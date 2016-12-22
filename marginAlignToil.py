@@ -68,8 +68,12 @@ def reAlignSamFileJobFunction(job, config, chain_alignment_output):
 def main():
     def parse_args():
         parser = ArgumentParser()
+        # required things
         parser.add_argument("--reference", "-r", dest="reference", required=True)
         parser.add_argument("--reads", "-q", dest="reads", required=True)
+        parser.add_argument("--hmm", dest="hmm_file", help="Hmm model parameters", required=False, default=None)
+        parser.add_argument("--out_sam", "-o", dest="out_sam", required=True)
+        # options
         parser.add_argument("--no_realign", dest="no_realign", help="Don't run any realignment step",
                             default=False, action="store_true")
         parser.add_argument("--no_chain", dest="no_chain", help="Don't run any chaining step",
@@ -78,7 +82,6 @@ def main():
                             default=0.5, type=float)
         parser.add_argument("--matchGamma", dest="matchGamma", help="Set the match gamma for the AMAP function",
                             default=0.0, type=float)
-        parser.add_argument("--out_sam", "-o", dest="out_sam", required=True)
         Job.Runner.addToilOptions(parser)
         return parser.parse_args()
 
@@ -88,11 +91,16 @@ def main():
     ref_import_string    = "file://{abs_path}".format(abs_path=os.path.abspath(args.reference))
     query_import_string  = "file://{abs_path}".format(abs_path=os.path.abspath(args.reads))
     output_export_string = "file://{abs_path}".format(abs_path=os.path.abspath(args.out_sam))
+    if args.hmm_file is not None:
+        hmm_import_string    = "file://{abs_path}".format(abs_path=os.path.abspath(args.hmm_file))
+    else:
+        hmm_import_string = None
 
     with Toil(args) as toil:
         if not toil.options.restart:
             reference_file_id = toil.importFile(ref_import_string)
             query_file_id     = toil.importFile(query_import_string)
+            hmm_file_id       = toil.importFile(hmm_import_string) if hmm_import_string is not None else None
 
             CONFIG = {
                 "reference_FileStoreID": reference_file_id,
@@ -101,7 +109,11 @@ def main():
                 "no_realign"           : args.no_realign,
                 "output_sam_path"      : output_export_string,
                 "EM"                   : False,
+                #"max_length_per_job"   : 1000,
                 "max_length_per_job"   : 700000,
+                "hmm_file"             : hmm_file_id,
+                "gap_gamma"            : args.gapGamma,
+                "match_gamma"          : args.matchGamma,
             }
 
             root_job = Job.wrapJobFn(bwaAlignJobFunction, CONFIG)
