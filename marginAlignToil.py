@@ -9,8 +9,9 @@ from toil.common import Toil
 from margin.toil.bwa import bwa_docker_alignment_root
 from margin.toil.chainAlignment import chainSamFile
 from margin.toil.realign import realignSamFile
+from margin.toil.expectationMaximisation import performBaumWelchOnSamJobFunction
 
-DEBUG = True
+DEBUG = False
 
 
 def bwaAlignJobFunction(job, config):
@@ -48,18 +49,26 @@ def chainSamFileJobFunction(job, config, bwa_output_map):
                  referenceFastaFile=reference)
 
     chainedSamFileId = job.fileStore.importFile("file://" + outputSam)
-    job.addFollowOnJobFn(reAlignSamFileJobFunction, config,
+    job.addFollowOnJobFn(realignSamFileJobFunction, config,
                          {"chained_alignment_FileStoreID": chainedSamFileId})
 
 
-def reAlignSamFileJobFunction(job, config, chain_alignment_output):
+def realignSamFileJobFunction(job, config, chain_alignment_output):
     if config["no_realign"]:
         job.fileStore.exportFile(chain_alignment_output["chained_alignment_FileStoreID"],
                                  config["output_sam_path"])
         return
     if config["EM"]:
         # make a child job to perform the EM and generate and import the new model
-        job.fileStore.logToMaster("ERROR EM not implemented yet")
+        job.fileStore.logToMaster("[realignSamFileJobFunction]Going on the run EM training "
+                                  "with SAM file {sam}, read fastq {reads} and reference "
+                                  "{reference}".format(
+                                      sam=chain_alignment_output["chained_alignment_FileStoreID"],
+                                      reads=config["sample_label"],
+                                      reference=config["reference_label"]))
+        assert(config["output_model"] is not None), "[realignSamFileJobFunction]Need a place to put trained_model"
+        job.addChildJobFn(performBaumWelchOnSamJobFunction, config, chain_alignment_output)
+        return
 
     job.fileStore.logToMaster("[reAlignSamFileJobFunction]Going on to HMM realignment")
     # get model, use the input model iff no EM, otherwise use the trained model
@@ -84,6 +93,11 @@ def main():
                             default=0.5, type=float)
         parser.add_argument("--matchGamma", dest="matchGamma", help="Set the match gamma for the AMAP function",
                             default=0.0, type=float)
+        # EM options
+        parser.add_argument("--em", dest="em", help="Run expectation maximisation (EM)",
+                            default=False, action="store_true")
+        parser.add_argument("--model_type", dest="model_type", action="store", default=None)
+        parser.add_argument("--out_model", action="store", default=None)
         Job.Runner.addToilOptions(parser)
         return parser.parse_args()
 
@@ -105,17 +119,31 @@ def main():
             hmm_file_id       = toil.importFile(hmm_import_string) if hmm_import_string is not None else None
 
             CONFIG = {
-                "reference_FileStoreID": reference_file_id,
-                "sample_FileStoreID"   : query_file_id,
-                "no_chain"             : args.no_chain,
-                "no_realign"           : args.no_realign,
-                "output_sam_path"      : output_export_string,
-                "EM"                   : False,
-                #"max_length_per_job"   : 1000,
-                "max_length_per_job"   : 700000,
-                "hmm_file"             : hmm_file_id,
-                "gap_gamma"            : args.gapGamma,
-                "match_gamma"          : args.matchGamma,
+                # TODO consider making input model strings for logging
+                "reference_label"             : ref_import_string,
+                "sample_label"                : query_import_string,
+                "reference_FileStoreID"       : reference_file_id,
+                "sample_FileStoreID"          : query_file_id,
+                "hmm_file"                    : hmm_file_id,
+                # alignment options
+                "no_chain"                    : args.no_chain,
+                "no_realign"                  : args.no_realign,
+                "output_sam_path"             : output_export_string,
+                "gap_gamma"                   : args.gapGamma,
+                "match_gamma"                 : args.matchGamma,
+                # EM options
+                "EM"                          : args.em,
+                "em_iterations"               : 5,
+                "random_start"                : False,
+                "set_Jukes_Cantor_emissions"  : None,
+                "model_type"                  : args.model_type,
+                "train_emissions"             : True,
+                "update_band"                 : False,
+                "output_model"                : args.out_model,
+                # job-related options (sharding)
+                #"max_length_per_job"          : 5000,
+                "max_length_per_job"          : 700000,
+                "max_sample_alignment_length" : 50000,
             }
 
             root_job = Job.wrapJobFn(bwaAlignJobFunction, CONFIG)
