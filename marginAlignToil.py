@@ -8,7 +8,7 @@ from toil.job import Job
 from toil.common import Toil
 from margin.toil.bwa import bwa_docker_alignment_root
 from margin.toil.chainAlignment import chainSamFile
-from margin.toil.realign import realignSamFile
+from margin.toil.realign import realignSamFileJobFunction
 from margin.toil.expectationMaximisation import performBaumWelchOnSamJobFunction
 
 DEBUG = False
@@ -49,37 +49,37 @@ def chainSamFileJobFunction(job, config, bwa_output_map):
                  referenceFastaFile=reference)
 
     chainedSamFileId = job.fileStore.importFile("file://" + outputSam)
-    job.addFollowOnJobFn(realignSamFileJobFunction, config,
+    job.addFollowOnJobFn(realignJobFunction, config,
                          {"chained_alignment_FileStoreID": chainedSamFileId})
 
 
-def realignSamFileJobFunction(job, config, chain_alignment_output):
+def realignJobFunction(job, config, chain_alignment_output):
     if config["no_realign"]:
         job.fileStore.exportFile(chain_alignment_output["chained_alignment_FileStoreID"],
                                  config["output_sam_path"])
         return
     if config["EM"]:
         # make a child job to perform the EM and generate and import the new model
-        job.fileStore.logToMaster("[realignSamFileJobFunction]Going on the run EM training "
+        job.fileStore.logToMaster("[realignJobFunction]Going on to run EM training "
                                   "with SAM file {sam}, read fastq {reads} and reference "
                                   "{reference}".format(
                                       sam=chain_alignment_output["chained_alignment_FileStoreID"],
                                       reads=config["sample_label"],
                                       reference=config["reference_label"]))
-        assert(config["output_model"] is not None), "[realignSamFileJobFunction]Need a place to put trained_model"
+        assert(config["output_model"] is not None), "[realignJobFunction]Need a place to put trained_model"
         job.addChildJobFn(performBaumWelchOnSamJobFunction, config, chain_alignment_output)
-        return
+        if DEBUG:
+            job.fileStore.logToMaster("[realignJobFunction]Finished EM using the trained model for "
+                                      "realignment")
 
-    job.fileStore.logToMaster("[reAlignSamFileJobFunction]Going on to HMM realignment")
-    # get model, use the input model iff no EM, otherwise use the trained model
-    # log the parameters of the realignment
-    job.addFollowOnJobFn(realignSamFile, config, chain_alignment_output)
+    job.fileStore.logToMaster("[realignJobFunction]Going on to HMM realignment")
+    job.addFollowOnJobFn(realignSamFileJobFunction, config, chain_alignment_output)
 
 
 def main():
     def parse_args():
         parser = ArgumentParser()
-        # required things
+        # basic input
         parser.add_argument("--reference", "-r", dest="reference", required=True)
         parser.add_argument("--reads", "-q", dest="reads", required=True)
         parser.add_argument("--hmm", dest="hmm_file", help="Hmm model parameters", required=False, default=None)
@@ -97,53 +97,62 @@ def main():
         parser.add_argument("--em", dest="em", help="Run expectation maximisation (EM)",
                             default=False, action="store_true")
         parser.add_argument("--model_type", dest="model_type", action="store", default=None)
-        parser.add_argument("--out_model", action="store", default=None)
+        parser.add_argument("--out_model", dest="out_model", action="store", default=None)
         Job.Runner.addToilOptions(parser)
         return parser.parse_args()
 
     args = parse_args()
 
     # TODO need a more streamlined way to import files
-    ref_import_string    = "file://{abs_path}".format(abs_path=os.path.abspath(args.reference))
-    query_import_string  = "file://{abs_path}".format(abs_path=os.path.abspath(args.reads))
-    output_export_string = "file://{abs_path}".format(abs_path=os.path.abspath(args.out_sam))
-    if args.hmm_file is not None:
-        hmm_import_string    = "file://{abs_path}".format(abs_path=os.path.abspath(args.hmm_file))
+    ref_import_str    = "file://{abs_path}".format(abs_path=os.path.abspath(args.reference))
+    query_import_str  = "file://{abs_path}".format(abs_path=os.path.abspath(args.reads))
+    output_export_str = "file://{abs_path}".format(abs_path=os.path.abspath(args.out_sam))
+
+    if args.em:
+        assert(args.out_model is not None)
+        model_export_str = "file://{abs_path}".format(abs_path=os.path.abspath(args.out_model))
     else:
-        hmm_import_string = None
+        model_export_str = None
+
+    if args.hmm_file is not None:
+        hmm_import_str = "file://{abs_path}".format(abs_path=os.path.abspath(args.hmm_file))
+    else:
+        hmm_import_str = None
 
     with Toil(args) as toil:
         if not toil.options.restart:
-            reference_file_id = toil.importFile(ref_import_string)
-            query_file_id     = toil.importFile(query_import_string)
-            hmm_file_id       = toil.importFile(hmm_import_string) if hmm_import_string is not None else None
+            reference_file_id = toil.importFile(ref_import_str)
+            query_file_id     = toil.importFile(query_import_str)
+            hmm_file_id       = toil.importFile(hmm_import_str) if hmm_import_str is not None else None
 
             CONFIG = {
                 # TODO consider making input model strings for logging
-                "reference_label"             : ref_import_string,
-                "sample_label"                : query_import_string,
-                "reference_FileStoreID"       : reference_file_id,
-                "sample_FileStoreID"          : query_file_id,
-                "hmm_file"                    : hmm_file_id,
+                "reference_label"                      : ref_import_str,
+                "sample_label"                         : query_import_str,
+                "reference_FileStoreID"                : reference_file_id,
+                "sample_FileStoreID"                   : query_file_id,
+                "input_hmm_FileStoreID"                : hmm_file_id,
                 # alignment options
-                "no_chain"                    : args.no_chain,
-                "no_realign"                  : args.no_realign,
-                "output_sam_path"             : output_export_string,
-                "gap_gamma"                   : args.gapGamma,
-                "match_gamma"                 : args.matchGamma,
+                "no_chain"                             : args.no_chain,
+                "no_realign"                           : args.no_realign,
+                "output_sam_path"                      : output_export_str,
+                "gap_gamma"                            : args.gapGamma,
+                "match_gamma"                          : args.matchGamma,
                 # EM options
-                "EM"                          : args.em,
-                "em_iterations"               : 5,
-                "random_start"                : False,
-                "set_Jukes_Cantor_emissions"  : None,
-                "model_type"                  : args.model_type,
-                "train_emissions"             : True,
-                "update_band"                 : False,
-                "output_model"                : args.out_model,
+                "EM"                                   : args.em,
+                "em_iterations"                        : 5,
+                "random_start"                         : False,
+                "set_Jukes_Cantor_emissions"           : None,
+                "model_type"                           : args.model_type,
+                "train_emissions"                      : True,
+                "update_band"                          : False,
+                "output_model"                         : model_export_str,
+                "gc_content"                           : 0.5,
+                "normalized_trained_model_FileStoreID" : None,
                 # job-related options (sharding)
-                #"max_length_per_job"          : 5000,
-                "max_length_per_job"          : 700000,
-                "max_sample_alignment_length" : 50000,
+                #"max_length_per_job"                   : 5000,
+                "max_length_per_job"                   : 700000,
+                "max_sample_alignment_length"          : 50000,
             }
 
             root_job = Job.wrapJobFn(bwaAlignJobFunction, CONFIG)
