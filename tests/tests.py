@@ -67,7 +67,7 @@ class ToilMarginAlignCiTest(unittest.TestCase):
         return
 
     def toil_clean(self, job_store):
-        cmd = "toil clean {}/".format(self.test_jobstore)
+        cmd = "toil clean ./{}/".format(self.test_jobstore)
         subprocess.check_call(cmd.split())
 
     def check_sam_files(self, observed_sam, expected_sam):
