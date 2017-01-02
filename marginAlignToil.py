@@ -11,7 +11,7 @@ from margin.toil.chainAlignment import chainSamFile
 from margin.toil.realign import realignSamFileJobFunction
 from margin.toil.expectationMaximisation import performBaumWelchOnSamJobFunction
 
-DEBUG = False
+DEBUG = True
 
 
 def bwaAlignJobFunction(job, config):
@@ -20,42 +20,45 @@ def bwaAlignJobFunction(job, config):
     """
     bwa_alignment_job = job.addChildJobFn(bwa_docker_alignment_root, config)
 
-    if bwa_alignment_job is None or config["no_chain"]:  # we're done
-        return
-
     job.addFollowOnJobFn(chainSamFileJobFunction, config, bwa_alignment_job.rv())
 
 
 def chainSamFileJobFunction(job, config, bwa_output_map):
     # Cull the files from the job store that we want
-    # nb. FsId == FileStoreId
-    sam_file  = job.fileStore.readGlobalFile(bwa_output_map["alignment"])
-    reference = job.fileStore.readGlobalFile(config["reference_FileStoreID"])
-    reads     = job.fileStore.readGlobalFile(config["sample_FileStoreID"])
+    if config["no_chain"]:
+        if DEBUG:
+            job.fileStore.logToMaster("[chainSamFileJobFunction]Not chaining SAM passing {sam} on to realignment"
+                                      "".format(sam=bwa_output_map["alignment"]))
+        job.addFollowOnJobFn(realignJobFunction, config, {"chain_alignment_output": bwa_output_map["alignment"]})
 
-    # this is the local path to the output chained SAM file
-    outputSam = job.fileStore.getLocalTempFile()
+    else:
+        sam_file  = job.fileStore.readGlobalFile(bwa_output_map["alignment"])
+        reference = job.fileStore.readGlobalFile(config["reference_FileStoreID"])
+        reads     = job.fileStore.readGlobalFile(config["sample_FileStoreID"])
+        outputSam = job.fileStore.getLocalTempFileName()
 
-    if DEBUG:
-        job.fileStore.logToMaster("[chainSamFileJobFunction] samFile: {sam} output {out} "
-                                  "reference {ref} reads {reads}".format(sam=sam_file,
-                                                                         out=outputSam,
-                                                                         ref=reference,
-                                                                         reads=reads))
+        if DEBUG:
+            job.fileStore.logToMaster("[chainSamFileJobFunction] chaining {bwa_out} (locally: {sam})"
+                                      "".format(bwa_out=bwa_output_map["alignment"], sam=sam_file))
 
-    chainSamFile(samFile=sam_file,
-                 outputSamFile=outputSam,
-                 readFastqFile=reads,
-                 referenceFastaFile=reference)
+        chainSamFile(samFile=sam_file,
+                     outputSamFile=outputSam,
+                     readFastqFile=reads,
+                     referenceFastaFile=reference)
 
-    chainedSamFileId = job.fileStore.importFile("file://" + outputSam)
-    job.addFollowOnJobFn(realignJobFunction, config,
-                         {"chained_alignment_FileStoreID": chainedSamFileId})
+        chainedSamFileId = job.fileStore.writeGlobalFile(outputSam)
+        job.addFollowOnJobFn(realignJobFunction, config,
+                             {"chain_alignment_output": chainedSamFileId})
 
 
 def realignJobFunction(job, config, chain_alignment_output):
     if config["no_realign"]:
-        job.fileStore.exportFile(chain_alignment_output["chained_alignment_FileStoreID"],
+        if DEBUG:
+            job.fileStore.logToMaster("[realignJobFunction]no_realign set {realign}, exporting chained "
+                                      "SAM to {out}".format(realign=config["no_realign"],
+                                                            out=config["output_sam_path"]))
+
+        job.fileStore.exportFile(chain_alignment_output["chain_alignment_output"],
                                  config["output_sam_path"])
         return
     if config["EM"]:
@@ -63,7 +66,7 @@ def realignJobFunction(job, config, chain_alignment_output):
         job.fileStore.logToMaster("[realignJobFunction]Going on to run EM training "
                                   "with SAM file {sam}, read fastq {reads} and reference "
                                   "{reference}".format(
-                                      sam=chain_alignment_output["chained_alignment_FileStoreID"],
+                                      sam=chain_alignment_output["chain_alignment_output"],
                                       reads=config["sample_label"],
                                       reference=config["reference_label"]))
         assert(config["output_model"] is not None), "[realignJobFunction]Need a place to put trained_model"

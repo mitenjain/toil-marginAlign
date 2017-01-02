@@ -27,15 +27,17 @@ class ToilMarginAlignCiTest(unittest.TestCase):
         self.debug      = debug
 
     def setUp(self):
-        self.reads_fastq   = "./tests/reads.fq"
-        self.references    = "./tests/references.fa"
-        self.test_jobstore = "testjobstore"
-        self.test_samfile  = "./tests/TESTSAM.sam"
-        self.test_model    = "./tests/last_hmm_20.txt"
+        self.reads_fastq     = "./tests/reads.fq"
+        self.references      = "./tests/references.fa"
+        self.test_jobstore   = "testjobstore"
+        self.test_samfile    = "./tests/TESTSAM.sam"
+        self.test_model      = "./tests/last_hmm_20.txt"
+        self.test_model_file = "./tests/testmodel.hmm"
         self.assertTrue(os.path.exists(self.reads_fastq))
         self.assertTrue(os.path.exists(self.test_model))
         self.assertTrue(os.path.exists(self.references))
         self.assertTrue(not os.path.exists(self.test_samfile))
+        self.assertTrue(not os.path.exists(self.test_model_file))
 
     @staticmethod
     def initialize(test_sam_file, correct_sam_file):
@@ -101,18 +103,26 @@ class ToilMarginAlignCiTest(unittest.TestCase):
                                                         referenceFastaFile=reference_fasta,
                                                         globalAlignment=global_alignment)
 
-    def test_bwa(self):
+    def check_hmm(self):
+        self.assertTrue(os.path.exists(self.test_model_file))
+        try:
+            Hmm.loadHmm(self.test_model_file)
+        except AssertionError:
+            self.assertTrue(False)
+
+    def test_bwa_only(self):
         correct_sam_file = "./tests/bwa_only.sam"
 
         self.initialize(self.test_samfile, correct_sam_file)
 
         command = "python marginAlignToil.py file:{jobstore} "\
                   "-r {references} -q {reads} "\
-                  "-o {test_sam} --workDir={cwd} --logInfo --no_chain".format(jobstore=self.test_jobstore,
-                                                                              references=self.references,
-                                                                              reads=self.reads_fastq,
-                                                                              cwd=os.getcwd(),
-                                                                              test_sam=self.test_samfile)
+                  "-o {test_sam} --workDir={cwd} --logInfo --no_chain "\
+                  "--no_realign".format(jobstore=self.test_jobstore,
+                                        references=self.references,
+                                        reads=self.reads_fastq,
+                                        cwd=os.getcwd(),
+                                        test_sam=self.test_samfile)
         self.run_test(command)
 
         # test that the AlignedRegions in the observed and expected are the same
@@ -146,10 +156,8 @@ class ToilMarginAlignCiTest(unittest.TestCase):
 
         self.clean_up(self.test_samfile)
 
-    # TODO need realign, without chaining
-
     def test_bwa_realign(self):
-        correct_sam_file = "./tests/bwa_realigned.sam"
+        correct_sam_file = "./tests/bwa_chained_realign.sam"
 
         self.initialize(self.test_samfile, correct_sam_file)
 
@@ -172,16 +180,53 @@ class ToilMarginAlignCiTest(unittest.TestCase):
 
         self.clean_up(self.test_samfile)
 
+    def test_bwa_realign_no_chain(self):
+        correct_sam_file = "./tests/bwa_nochain_realign.sam"
+
+        self.initialize(self.test_samfile, correct_sam_file)
+
+        command = "python marginAlignToil.py file:{jobstore} "\
+                  "-r {references} -q {reads} "\
+                  "-o {test_sam} --workDir={cwd} --logInfo --no_chain "\
+                  "--hmm {hmm} ".format(jobstore=self.test_jobstore,
+                                        references=self.references,
+                                        reads=self.reads_fastq,
+                                        cwd=os.getcwd(),
+                                        test_sam=self.test_samfile,
+                                        hmm=self.test_model)
+
+        self.run_test(command)
+        self.check_sam_files(self.test_samfile, correct_sam_file)
+        stats = self.validate_sam(self.test_samfile, self.reads_fastq, self.references)
+        if self.show_stats:
+            self.print_stats(self.test_name, stats)
+
+        self.clean_up(self.test_samfile)
+
+    def test_defaults(self):
+        raise NotImplementedError
+
+    def test_bwa_em_no_chain(self):
+        command = "python marginAlignToil.py file:{jobstore} "\
+                  "--workDir={cwd} -r {reference} "\
+                  "-q {reads} -o {test_sam} --no_chain "\
+                  "--em --model_type=fiveState --out_model {test_model}"\
+                  "".format(jobstore=self.test_jobstore,
+                            reference=self.references,
+                            reads=self.reads_fastq,
+                            cwd=os.getcwd(),
+                            test_sam=self.test_samfile,
+                            test_model=self.test_model_file)
+
+        self.run_test(command=command, outmodel=self.test_model_file)
+        self.check_hmm()
+        stats = self.validate_sam(self.test_samfile, self.reads_fastq, self.references)
+        if self.show_stats:
+            self.print_stats(self.test_name, stats)
+        self.clean_up(self.test_samfile)
+        self.clean_up(self.test_model_file)
+
     def test_bwa_em(self):
-        def check_hmm(hmm_file):
-            self.assertTrue(os.path.exists(hmm_file))
-            try:
-                Hmm.loadHmm(hmm_file)
-            except AssertionError:
-                self.assertTrue(False)
-
-        test_model_file = "./tests/testmodel.hmm"
-
         command = "python marginAlignToil.py file:{jobstore} "\
                   "--workDir={cwd} -r {reference} "\
                   "-q {reads} -o {test_sam} "\
@@ -191,15 +236,15 @@ class ToilMarginAlignCiTest(unittest.TestCase):
                             reads=self.reads_fastq,
                             cwd=os.getcwd(),
                             test_sam=self.test_samfile,
-                            test_model=test_model_file)
+                            test_model=self.test_model_file)
 
-        self.run_test(command=command, outmodel=test_model_file)
-        check_hmm(test_model_file)
+        self.run_test(command=command, outmodel=self.test_model_file)
+        self.check_hmm()
         stats = self.validate_sam(self.test_samfile, self.reads_fastq, self.references)
         if self.show_stats:
             self.print_stats(self.test_name, stats)
         self.clean_up(self.test_samfile)
-        self.clean_up(test_model_file)
+        self.clean_up(self.test_model_file)
 
 
 def main():
@@ -214,10 +259,12 @@ def main():
     debug      = args.debug
 
     testSuite = unittest.TestSuite()
-    testSuite.addTest(ToilMarginAlignCiTest("test_bwa", work_dir, show_stats, debug))
-    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_chained", work_dir, show_stats, debug))
-    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign", work_dir, show_stats, debug))
+    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_only", work_dir, show_stats, debug))
+    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_chained", work_dir, show_stats, debug))
+    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign_no_chain", work_dir, show_stats, debug))
+    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign", work_dir, show_stats, debug))
     testSuite.addTest(ToilMarginAlignCiTest("test_bwa_em", work_dir, show_stats, debug))
+    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_em_no_chain", work_dir, show_stats, debug))
     testRunner = unittest.TextTestRunner(verbosity=2)
     testRunner.run(testSuite)
 
