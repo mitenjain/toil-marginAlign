@@ -10,7 +10,7 @@ import pysam
 import numpy as np
 from itertools import izip
 from argparse import ArgumentParser
-from cPecan.cPecanEm import Hmm
+from margin.toil.hmm import Hmm
 from margin.utils import ReadAlignmentStats
 
 
@@ -259,10 +259,10 @@ def main():
     debug      = args.debug
 
     testSuite = unittest.TestSuite()
-    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_only", work_dir, show_stats, debug))
-    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_chained", work_dir, show_stats, debug))
-    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign_no_chain", work_dir, show_stats, debug))
-    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign", work_dir, show_stats, debug))
+    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_only", work_dir, show_stats, debug))
+    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_chained", work_dir, show_stats, debug))
+    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign_no_chain", work_dir, show_stats, debug))
+    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign", work_dir, show_stats, debug))
     testSuite.addTest(ToilMarginAlignCiTest("test_bwa_em", work_dir, show_stats, debug))
     testSuite.addTest(ToilMarginAlignCiTest("test_bwa_em_no_chain", work_dir, show_stats, debug))
     testRunner = unittest.TextTestRunner(verbosity=2)
