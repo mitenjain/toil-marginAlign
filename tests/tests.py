@@ -17,6 +17,22 @@ from margin.utils import ReadAlignmentStats
 DEVNULL = open(os.devnull, 'w')
 
 
+class DependencyTests(unittest.TestCase):
+    def test_toil(self):
+        command = "python tests/toySortExample.py file:jobstore --workDir={cwd} "\
+                  "--clean=always".format(cwd=os.getcwd())
+        try:
+            subprocess.check_call(command.split(), stdout=DEVNULL, stderr=DEVNULL)
+        except subprocess.CalledProcessError:
+            self.assertTrue(False)
+
+        if os.path.exists("./file_to_sort.txt"):
+            os.remove("./file_to_sort.txt")
+
+    def test_docker(self):
+        pass
+
+
 class ToilMarginAlignCiTest(unittest.TestCase):
     def __init__(self, test_name, work_dir, show_stats, debug):
         # type: (str, str, bool, bool)
@@ -259,12 +275,13 @@ def main():
     debug      = args.debug
 
     testSuite = unittest.TestSuite()
-    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_only", work_dir, show_stats, debug))
-    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_chained", work_dir, show_stats, debug))
-    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign_no_chain", work_dir, show_stats, debug))
-    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign", work_dir, show_stats, debug))
-    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_em", work_dir, show_stats, debug))
-    testSuite.addTest(ToilMarginAlignCiTest("test_bwa_em_no_chain", work_dir, show_stats, debug))
+    testSuite.addTest(DependencyTests("test_toil"))
+    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_only", work_dir, show_stats, debug))
+    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_chained", work_dir, show_stats, debug))
+    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign_no_chain", work_dir, show_stats, debug))
+    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign", work_dir, show_stats, debug))
+    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_em", work_dir, show_stats, debug))
+    #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_em_no_chain", work_dir, show_stats, debug))
     testRunner = unittest.TextTestRunner(verbosity=2)
     testRunner.run(testSuite)
 
