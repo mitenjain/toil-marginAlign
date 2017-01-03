@@ -29,7 +29,7 @@ class DependencyTests(unittest.TestCase):
         if os.path.exists("./file_to_sort.txt"):
             os.remove("./file_to_sort.txt")
 
-    def test_docker(self):
+    def test_docker_call(self):
         pass
 
 
@@ -150,6 +150,29 @@ class ToilMarginAlignCiTest(unittest.TestCase):
 
         self.clean_up(self.test_samfile)
 
+    def test_defaults(self):
+        correct_sam_file = "./tests/bwa_chained_realign.sam"
+
+        self.initialize(self.test_samfile, correct_sam_file)
+
+        command = "python marginAlignToil.py file:{jobstore} "\
+                  "-r {references} -q {reads} "\
+                  "-o {test_sam} --workDir={cwd} --logInfo "\
+                  "".format(jobstore=self.test_jobstore,
+                            references=self.references,
+                            reads=self.reads_fastq,
+                            cwd=os.getcwd(),
+                            test_sam=self.test_samfile)
+
+        self.run_test(command)
+
+        self.check_sam_files(self.test_samfile, correct_sam_file)
+        stats = self.validate_sam(self.test_samfile, self.reads_fastq, self.references)
+        if self.show_stats:
+            self.print_stats(self.test_name, stats)
+
+        self.clean_up(self.test_samfile)
+
     def test_bwa_chained(self):
         correct_sam_file = "./tests/bwa_chained.sam"
 
@@ -219,9 +242,6 @@ class ToilMarginAlignCiTest(unittest.TestCase):
 
         self.clean_up(self.test_samfile)
 
-    def test_defaults(self):
-        raise NotImplementedError
-
     def test_bwa_em_no_chain(self):
         command = "python marginAlignToil.py file:{jobstore} "\
                   "--workDir={cwd} -r {reference} "\
@@ -280,6 +300,7 @@ def main():
     #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_chained", work_dir, show_stats, debug))
     #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign_no_chain", work_dir, show_stats, debug))
     #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_realign", work_dir, show_stats, debug))
+    testSuite.addTest(ToilMarginAlignCiTest("test_defaults", work_dir, show_stats, debug))
     #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_em", work_dir, show_stats, debug))
     #testSuite.addTest(ToilMarginAlignCiTest("test_bwa_em_no_chain", work_dir, show_stats, debug))
     testRunner = unittest.TextTestRunner(verbosity=2)

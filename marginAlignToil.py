@@ -14,6 +14,17 @@ from margin.toil.expectationMaximisation import performBaumWelchOnSamJobFunction
 DEBUG = True
 
 
+def baseDirectoryPath():
+    return os.path.dirname(os.path.abspath(__file__)) + "/"
+
+
+def getDefaultHmm():
+    default_model = baseDirectoryPath() + "tests/last_hmm_20.txt"
+    assert(os.path.exists(default_model)), "[getDefaultHmm]ERROR didn't find default model, "\
+                                           "looked for it {here}".format(here=default_model)
+    return default_model
+
+
 def bwaAlignJobFunction(job, config):
     # type: (toil.job.Job, dict<string, (string and bool))>
     """Generates a SAM file, chains it (optionally), and realignes with cPecan HMM
@@ -85,9 +96,10 @@ def main():
         # basic input
         parser.add_argument("--reference", "-r", dest="reference", required=True)
         parser.add_argument("--reads", "-q", dest="reads", required=True)
-        parser.add_argument("--hmm", dest="hmm_file", help="Hmm model parameters", required=False, default=None)
         parser.add_argument("--out_sam", "-o", dest="out_sam", required=True)
         # options
+        parser.add_argument("--hmm", dest="hmm_file", help="Hmm model parameters", required=False,
+                            default=getDefaultHmm())
         parser.add_argument("--no_realign", dest="no_realign", help="Don't run any realignment step",
                             default=False, action="store_true")
         parser.add_argument("--no_chain", dest="no_chain", help="Don't run any chaining step",
