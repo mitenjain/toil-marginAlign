@@ -90,7 +90,7 @@ def realignJobFunction(job, config, chain_alignment_output):
     job.addFollowOnJobFn(realignSamFileJobFunction, config, chain_alignment_output)
 
 
-def main(parser, args):
+def main():
     def parse_args():
         parser = ArgumentParser()
         # basic input
@@ -165,7 +165,6 @@ def main(parser, args):
                 "gc_content"                           : 0.5,
                 "normalized_trained_model_FileStoreID" : None,
                 # job-related options (sharding)
-                #"max_length_per_job"                   : 5000,
                 "max_length_per_job"                   : 700000,
                 "max_sample_alignment_length"          : 50000,
             }
@@ -174,3 +173,6 @@ def main(parser, args):
             return toil.start(root_job)
         else:
             toil.restart()
+
+if __name__ == '__main__':
+    main()
