@@ -34,23 +34,23 @@ def bwaAlignJobFunction(job, config):
     job.addFollowOnJobFn(chainSamFileJobFunction, config, bwa_alignment_job.rv())
 
 
-def chainSamFileJobFunction(job, config, bwa_output_map):
+def chainSamFileJobFunction(job, config, aln_struct):
     # Cull the files from the job store that we want
     if config["no_chain"]:
         if DEBUG:
-            job.fileStore.logToMaster("[chainSamFileJobFunction]Not chaining SAM passing {sam} on to realignment"
-                                      "".format(sam=bwa_output_map["alignment"]))
-        job.addFollowOnJobFn(realignJobFunction, config, {"chain_alignment_output": bwa_output_map["alignment"]})
+            job.fileStore.logToMaster("[chainSamFileJobFunction]Not chaining SAM, passing {sam} "
+                                      "on to realignment".format(sam=aln_struct.FileStoreID()))
+        job.addFollowOnJobFn(realignJobFunction, config, {"chain_alignment_output": aln_struct.FileStoreID()})
 
     else:
-        sam_file  = job.fileStore.readGlobalFile(bwa_output_map["alignment"])
+        sam_file  = job.fileStore.readGlobalFile(aln_struct.FileStoreID())
         reference = job.fileStore.readGlobalFile(config["reference_FileStoreID"])
         reads     = job.fileStore.readGlobalFile(config["sample_FileStoreID"])
         outputSam = job.fileStore.getLocalTempFileName()
 
         if DEBUG:
             job.fileStore.logToMaster("[chainSamFileJobFunction] chaining {bwa_out} (locally: {sam})"
-                                      "".format(bwa_out=bwa_output_map["alignment"], sam=sam_file))
+                                      "".format(bwa_out=aln_struct.FileStoreID(), sam=sam_file))
 
         chainSamFile(samFile=sam_file,
                      outputSamFile=outputSam,
