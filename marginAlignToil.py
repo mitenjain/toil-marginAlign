@@ -90,7 +90,7 @@ def realignJobFunction(job, config, chain_alignment_output):
     job.addFollowOnJobFn(realignSamFileJobFunction, config, chain_alignment_output)
 
 
-def main():
+def marginAlign_main(parser, args):
     def parse_args():
         parser = ArgumentParser()
         # basic input
@@ -174,6 +174,3 @@ def main():
             return toil.start(root_job)
         else:
             toil.restart()
-
-if __name__ == "__main__":
-    main()
