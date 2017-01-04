@@ -34,6 +34,8 @@ def run_tool(job, config):
         config["input_hmm_FileStoreID"] = None
     if config["EM"]:
         config["normalized_trained_model_FileStoreID"] = None
+    config["sample_label"]    = config["samples"][0][1]
+    config["reference_label"] = config["ref"]
 
     # Pipeline starts here
     if config["align"]:
@@ -103,13 +105,17 @@ def generateConfig():
 
         # EM options
         # Optional: set true to do EM
-        EM:
-
-        # Required | em == True && hmm_file is None
-        model_type:
-
-        # Required | em == True
-        out_model:
+        EM: True
+        # Required: path to location of output model
+        output_model:  file:///Users/Rand/projects/toil_dev/toil-marginAlign/sandbox/testmodel.hmm
+        model_type: fiveState
+        em_iterations: 5
+        random_start: False
+        # set_Jukes_Cantor_emissions is of type Float
+        set_Jukes_Cantor_emissions:
+        update_band: False
+        gc_content: 0.5
+        train_emissions: True
     """[1:])
 
 
