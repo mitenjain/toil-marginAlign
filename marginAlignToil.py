@@ -65,7 +65,7 @@ def chainSamFileJobFunction(job, config, bwa_output_map):
 def realignJobFunction(job, config, chain_alignment_output):
     if config["no_realign"]:
         if DEBUG:
-            job.fileStore.logToMaster("[realignJobFunction]no_realign set {realign}, exporting chained "
+            job.fileStore.logToMaster("[realignJobFunction]no_realign set {realign}, exporting "
                                       "SAM to {out}".format(realign=config["no_realign"],
                                                             out=config["output_sam_path"]))
 
@@ -90,7 +90,7 @@ def realignJobFunction(job, config, chain_alignment_output):
     job.addFollowOnJobFn(realignSamFileJobFunction, config, chain_alignment_output)
 
 
-def marginAlign_main(parser, args):
+def main(parser, args):
     def parse_args():
         parser = ArgumentParser()
         # basic input

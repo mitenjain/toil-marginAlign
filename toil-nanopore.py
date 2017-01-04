@@ -8,14 +8,46 @@ import textwrap
 import yaml
 from urlparse import urlparse
 
+from toil.common import Toil
 from toil.job import Job
-from toil_lib.files import generate_file
 from toil_lib import UserError, require
+from toil_lib.files import generate_file
+from toil_lib.urls import download_url_job
+
+from marginAlignToil import bwaAlignJobFunction
 
 
-def run_tool(args, config, samples):
-    print("RUNTOOL")
+def run_tool(job, config):
+    if len(config["samples"]) > 1:
+        job.fileStore.logToMaster("[run_tool]Multisample input not ready, yet")
+        raise NotImplementedError
 
+    # import the reference and sample file into the fileStore
+    config["reference_FileStoreID"] = job.addChildJobFn(download_url_job, config["ref"], disk="1G").rv()
+    # TODO implement a way to deal with multiple samples
+    config["sample_FileStoreID"]    = job.addChildJobFn(download_url_job, config["samples"][0][1], disk="1G").rv()
+    if config["hmm_file"] is not None:
+        config["input_hmm_FileStoreID"] = job.addChildJobFn(download_url_job, config["hmm_file"], disk="10M").rv()
+    else:
+        if not config["no_realign"]:
+            require(config["EM"], "[run_tool]Need to specify an input model or set EM to True to perform HMM realignment")
+        config["input_hmm_FileStoreID"] = None
+    if config["EM"]:
+        config["normalized_trained_model_FileStoreID"] = None
+
+    # Pipeline starts here
+    if config["align"]:
+        # get the sample
+        job.addChildJobFn(bwaAlignJobFunction, config)
+
+    elif config["learn_model"]:
+        raise NotImplementedError
+    elif config["caller"]:
+        raise NotImplementedError
+    elif config["stats"]:
+        raise NotImplementedError
+    elif config["signal"]:
+        raise NotImplementedError
 
 
 def print_help():
@@ -34,36 +66,44 @@ def generateConfig():
         # Local inputs follow the URL convention: file:///full/path/to/input
         # S3 URLs follow the convention: s3://bucket/directory/file.txt
         #
-        # Comments (beginning with #) do not need to be removed. Optional parameters left blank are treated as false.
+        # some options have been filled in with defaults
 
         ## Universal Options/Inputs ##
-        # Required: Reference fasta file
-        ref: s3://cgl-pipeline-inputs/alignment/hg19.fa
+        # Required: Which subprograms to run, typically you run all 4, but you can run them piecemeal if you like
+        # in that case the provided inputs will be checked at run time
+        align: True
+        learn_model:
+        caller:
+        stats:
+        signal:
 
-        # Required: Reads FASTQ
-        reads:
+        # Optional: Debug increasing logging
+        debug: True
+
+        # Required: Reference fasta file
+        ref: file:///Users/Rand/projects/toil_dev/toil-marginAlign/tests/references.fa
 
         # Required: Output location of sample. Can be full path to a directory or an s3:// URL
         # Warning: S3 buckets must exist prior to upload or it will fail.
-        output-dir:
+        output_sam_path: file:///Users/Rand/projects/toil_dev/toil-marginAlign/sandbox/testsam.sam
 
         ## MarginAlign Options ##
-        # Optional: gap Gamma
-        gap_gamma:
+        # all required options have default values
+        gap_gamma:                     0.5
+        match_gamma:                   0.0
+        "max_length_per_job":          700000
+        "max_sample_alignment_length": 50000
 
-        # Optional: match Gamma
-        match_gamma:
-
-        # Optional: no chain and no re-align
+        # Optional: no chain and/or no re-align
         no_chain:
         no_realign:
 
         # Optional: Alignment Model
-        hmm_file:
+        hmm_file: file:///Users/Rand/projects/toil_dev/toil-marginAlign/tests/last_hmm_20.txt
 
         # EM options
         # Optional: set true to do EM
-        em:
+        EM:
 
         # Required | em == True && hmm_file is None
         model_type:
@@ -106,7 +146,7 @@ def parseManifest(path_to_manifest):
         # check the file_type and the URL
         require(file_type in allowed_file_types, "[parse_line]Unrecognized file type {}".format(file_type))
         require(urlparse(sample_url).scheme and urlparse(sample_url), "Invalid URL passed for {}".format(sample_url))
-        return (file_type, sample_url)
+        return [file_type, sample_url]
 
     with open(path_to_manifest, "r") as fH:
         return map(parse_line, [x for x in fH if (not x.isspace() and not x.startswith("#"))])
@@ -160,10 +200,17 @@ def main():
     elif args.command == "run":
         require(os.path.exists(args.config), "{config} not found run generate-config".format(config=args.config))
         # Parse config
-        parsed_config = {x.replace('-', '_'): y for x, y in yaml.load(open(args.config).read()).iteritems()}
-        #print(parsed_config)
-        parsed_manifest = parseManifest(args.manifest)
-        
+        config  = {x.replace('-', '_'): y for x, y in yaml.load(open(args.config).read()).iteritems()}
+        samples = parseManifest(args.manifest)
+        config["samples"] = samples
+
+        with Toil(args) as toil:
+            if not toil.options.restart:
+                root_job = Job.wrapJobFn(run_tool, config)
+                return toil.start(root_job)
+            else:
+                toil.restart()
+
 
 if __name__ == '__main__':
     try:
