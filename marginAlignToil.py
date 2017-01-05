@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Toil script to run marginAlign nanopore analysis
+"""Toil script to run marginAlign analysis
 """
 from __future__ import print_function
 import os
@@ -7,9 +7,10 @@ from argparse import ArgumentParser
 from toil.job import Job
 from toil.common import Toil
 from margin.toil.bwa import bwa_docker_alignment_root
-from margin.toil.chainAlignment import chainSamFile
 from margin.toil.realign import realignSamFileJobFunction
+from margin.toil.chainAlignment import chainSamFile
 from margin.toil.expectationMaximisation import performBaumWelchOnSamJobFunction
+
 
 DEBUG = True
 
@@ -58,36 +59,34 @@ def chainSamFileJobFunction(job, config, aln_struct):
                      referenceFastaFile=reference)
 
         chainedSamFileId = job.fileStore.writeGlobalFile(outputSam)
-        job.addFollowOnJobFn(realignJobFunction, config,
-                             {"chain_alignment_output": chainedSamFileId})
+        job.addFollowOnJobFn(realignJobFunction, config, chainedSamFileId)
 
 
-def realignJobFunction(job, config, chain_alignment_output):
+def realignJobFunction(job, config, input_samfile_fid):
     if config["no_realign"]:
         if DEBUG:
             job.fileStore.logToMaster("[realignJobFunction]no_realign set {realign}, exporting "
                                       "SAM to {out}".format(realign=config["no_realign"],
                                                             out=config["output_sam_path"]))
 
-        job.fileStore.exportFile(chain_alignment_output["chain_alignment_output"],
-                                 config["output_sam_path"])
+        job.fileStore.exportFile(input_samfile_fid, config["output_sam_path"])
         return
     if config["EM"]:
         # make a child job to perform the EM and generate and import the new model
         job.fileStore.logToMaster("[realignJobFunction]Going on to run EM training "
                                   "with SAM file {sam}, read fastq {reads} and reference "
                                   "{reference}".format(
-                                      sam=chain_alignment_output["chain_alignment_output"],
+                                      sam=input_samfile_fid,
                                       reads=config["sample_label"],
                                       reference=config["reference_label"]))
         assert(config["output_model"] is not None), "[realignJobFunction]Need a place to put trained_model"
-        job.addChildJobFn(performBaumWelchOnSamJobFunction, config, chain_alignment_output)
+        job.addChildJobFn(performBaumWelchOnSamJobFunction, config, input_samfile_fid)
         if DEBUG:
             job.fileStore.logToMaster("[realignJobFunction]Finished EM using the trained model for "
                                       "realignment")
 
     job.fileStore.logToMaster("[realignJobFunction]Going on to HMM realignment")
-    job.addFollowOnJobFn(realignSamFileJobFunction, config, chain_alignment_output)
+    job.addFollowOnJobFn(realignSamFileJobFunction, config, input_samfile_fid)
 
 
 def main():

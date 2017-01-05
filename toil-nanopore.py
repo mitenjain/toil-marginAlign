@@ -20,6 +20,7 @@ from margin.toil.alignment import AlignmentStruct, AlignmentFormat
 
 from sample import Sample
 from marginAlignToil import bwaAlignJobFunction, chainSamFileJobFunction
+from marginCallerToil import marginCallerJobFunction
 
 
 def getFastqFromBam(job, bam_sample, samtools_image="quay.io/ucsc_cgl/samtools"):
@@ -86,17 +87,18 @@ def run_tool(job, config, sample):
     # Pipeline starts here
     if config["align"]:
         if bwa_alignment_fid is None:
-            job.addFollowOnJobFn(bwaAlignJobFunction, config)
+            marginAlignJob = job.addFollowOnJobFn(bwaAlignJobFunction, config)
         else:
             aln_struct = AlignmentStruct(bwa_alignment_fid, AlignmentFormat.BAM)
-            job.addFollowOnJobFn(chainSamFileJobFunction, config, aln_struct)
-    elif config["learn_model"]:
+            marginAlignJob = job.addFollowOnJobFn(chainSamFileJobFunction, config, aln_struct)
+        # TODO add followon to marginCaller here.
+    if config["learn_model"]:
         raise NotImplementedError
-    elif config["caller"]:
+    if config["caller"]:
+        job.addFollowOnJobFn(marginCallerJobFunction, config, bwa_alignment_fid)
+    if config["stats"]:
         raise NotImplementedError
-    elif config["stats"]:
-        raise NotImplementedError
-    elif config["signal"]:
+    if config["signal"]:
         raise NotImplementedError
 
 
@@ -121,9 +123,9 @@ def generateConfig():
         ## Universal Options/Inputs ##
         # Required: Which subprograms to run, typically you run all 4, but you can run them piecemeal if you like
         # in that case the provided inputs will be checked at run time
-        align: True
+        align:
         learn_model:
-        caller:
+        caller: True
         stats:
         signal:
 
@@ -133,11 +135,11 @@ def generateConfig():
         # Required: Reference fasta file
         ref: file:///Users/Rand/projects/toil_dev/toil-marginAlign/tests/references.fa
 
+        ## MarginAlign Options ##
         # Required: Output location of sample. Can be full path to a directory or an s3:// URL
         # Warning: S3 buckets must exist prior to upload or it will fail.
-        output_sam_path: file:///Users/Rand/projects/toil_dev/toil-marginAlign/sandbox/testsam.sam
+        output_sam_path:
 
-        ## MarginAlign Options ##
         # all required options have default values
         gap_gamma:                     0.5
         match_gamma:                   0.0
@@ -153,17 +155,21 @@ def generateConfig():
 
         # EM options
         # Optional: set true to do EM
-        EM: True
+        EM:
         # Required: path to location of output model
-        output_model:  file:///Users/Rand/projects/toil_dev/toil-marginAlign/sandbox/testmodel.hmm
-        model_type: fiveState
+        output_model:
+        model_type:    fiveState
         em_iterations: 5
-        random_start: False
+        random_start:  False
         # set_Jukes_Cantor_emissions is of type Float
         set_Jukes_Cantor_emissions:
-        update_band: False
-        gc_content: 0.5
+        update_band:     False
+        gc_content:      0.5
         train_emissions: True
+
+        ## MarginCaller Options ##
+        output_vcf_path: file:///Users/Rand/projects/toil_dev/toil-marginAlign/sandbox/testvcf.vcf
+        no_margin: False
     """[1:])
 
 
