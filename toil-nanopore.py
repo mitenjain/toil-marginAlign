@@ -24,6 +24,8 @@ from marginCallerToil import marginCallerJobFunction
 
 
 def getFastqFromBam(job, bam_sample, samtools_image="quay.io/ucsc_cgl/samtools"):
+    # n.b. this is NOT a jobFunctionWrappingJob, it just takes the parent job as 
+    # an argument to have access to the job store
     # download the BAM to the local directory, use a uid to aviod conflicts
     uid           = uuid.uuid4().hex
     work_dir      = job.fileStore.getLocalTempDir()
@@ -95,6 +97,11 @@ def run_tool(job, config, sample):
     if config["learn_model"]:
         raise NotImplementedError
     if config["caller"]:
+        require(config["error_model"] is not None, "[run_tool]Caller subprogram requires an error model"
+                "None was given")
+        config["error_model_FileStoreID"] = job.addChildJobFn(download_url_job,
+                                                              config["error_model"],
+                                                              disk="10M").rv()
         job.addFollowOnJobFn(marginCallerJobFunction, config, bwa_alignment_fid)
     if config["stats"]:
         raise NotImplementedError
@@ -168,8 +175,15 @@ def generateConfig():
         train_emissions: True
 
         ## MarginCaller Options ##
+        # Required: path to VCF output
         output_vcf_path: file:///Users/Rand/projects/toil_dev/toil-marginAlign/sandbox/testvcf.vcf
+        # Required: Error model
+        error_model: file:///Users/Rand/projects/toil_dev/toil-marginAlign/tests/last_hmm_20.txt
+
+        # Options
+        # n.b. required options have default values filled in
         no_margin: False
+        variant_threshold: 0.3
     """[1:])
 
 
