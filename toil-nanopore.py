@@ -17,6 +17,7 @@ from toil_lib.urls import download_url_job, download_url
 from toil_lib.programs import docker_call
 from margin.toil.localFileManager import LocalFile
 from margin.toil.alignment import AlignmentStruct, AlignmentFormat
+from margin.toil.stats import marginStatsJobFunction
 
 from sample import Sample
 from marginAlignToil import bwaAlignJobFunction, chainSamFileJobFunction
@@ -88,25 +89,34 @@ def run_tool(job, config, sample):
 
     # Pipeline starts here
     if config["align"]:
-        if bwa_alignment_fid is None:
-            marginAlignJob = job.addFollowOnJobFn(bwaAlignJobFunction, config)
-        else:
-            aln_struct = AlignmentStruct(bwa_alignment_fid, AlignmentFormat.BAM)
-            marginAlignJob = job.addFollowOnJobFn(chainSamFileJobFunction, config, aln_struct)
-        # TODO add followon to marginCaller here.
-    if config["learn_model"]:
+        require(config["output_sam_path"], "[run_tool]Output path for SAM required")
+        job.addFollowOnJobFn(marginAlignJobFunction, config, bwa_alignment_fid)
+    elif config["learn_model"]:
         raise NotImplementedError
-    if config["caller"]:
+    elif config["caller"]:
         require(config["error_model"] is not None, "[run_tool]Caller subprogram requires an error model"
                 "None was given")
         config["error_model_FileStoreID"] = job.addChildJobFn(download_url_job,
                                                               config["error_model"],
                                                               disk="10M").rv()
         job.addFollowOnJobFn(marginCallerJobFunction, config, bwa_alignment_fid)
-    if config["stats"]:
+    elif config["stats"]:
+        require(sample.file_type == "bam", "[run_tool]stats sub progam requires BAM input")
+        require(config["stats_outfile_url"], "[run_tool]did not provide output URL for stats")
+        job.addFollowOnJobFn(marginStatsJobFunction, config, bwa_alignment_fid)
+    elif config["signal"]:
         raise NotImplementedError
-    if config["signal"]:
-        raise NotImplementedError
+    else:
+        require(False, "[run_tool]No subprogram given")
+
+
+def marginAlignJobFunction(job, config, bwa_alignment_fid):
+    if bwa_alignment_fid is None:
+        job.addFollowOnJobFn(bwaAlignJobFunction, config)
+    else:
+        aln_struct = AlignmentStruct(bwa_alignment_fid, AlignmentFormat.BAM)
+        job.addFollowOnJobFn(chainSamFileJobFunction, config, aln_struct)
+    # TODO add logic for following on to marginCaller here
 
 
 def print_help():
@@ -150,8 +160,9 @@ def generateConfig():
         # all required options have default values
         gap_gamma:                     0.5
         match_gamma:                   0.0
+
+        # total length (in nucleotides) that will be assigned to an HMM alignment job
         "max_length_per_job":          700000
-        "max_sample_alignment_length": 50000
 
         # Optional: no chain and/or no re-align
         no_chain:
@@ -163,13 +174,26 @@ def generateConfig():
         # EM options
         # Optional: set true to do EM
         EM:
+
         # Required: path to location of output model
         output_model:
+
+        # Model-related options
+        # if no input model is set, make this kind of model
+        # choices: fiveState, fiveStateAsymmetric, threeState, threeStateAsymmetric
         model_type:    fiveState
+
+        # randomly sample this amount of bases for EM
+        "max_sample_alignment_length": 50000
+
+        # perform this number of EM iterations
         em_iterations: 5
+        # n.b random start with searching for best model is not *quite* implemented yet
         random_start:  False
-        # set_Jukes_Cantor_emissions is of type Float
+
+        # set_Jukes_Cantor_emissions is of type Float or blank (None)
         set_Jukes_Cantor_emissions:
+        # update the band NOT IMPLEMENTED
         update_band:     False
         gc_content:      0.5
         train_emissions: True
@@ -181,9 +205,22 @@ def generateConfig():
         error_model: file:///Users/Rand/projects/toil_dev/toil-marginAlign/tests/last_hmm_20.txt
 
         # Options
-        # n.b. required options have default values filled in
+        # required options have default values filled in
         no_margin: False
         variant_threshold: 0.3
+
+        ## MarginStats Options ##
+        # all options are required, and have defaults except the output URL
+        stats_outfile_url: file:///Users/Rand/projects/toil_dev/toil-marginAlign/sandbox/stats.txt
+        local_alignment:            False
+        noStats:                    False
+        printValuePerReadAlignment: True
+        identity:                   True
+        readCoverage:               True
+        mismatchesPerAlignedBase:   True
+        deletionsPerReadBase:       True
+        insertionsPerReadBase:      True
+        readLength:                 True
     """[1:])
 
 
