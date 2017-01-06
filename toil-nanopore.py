@@ -162,7 +162,7 @@ def generateConfig():
         match_gamma:                   0.0
 
         # total length (in nucleotides) that will be assigned to an HMM alignment job
-        "max_length_per_job":          700000
+        max_length_per_job:          700000
 
         # Optional: no chain and/or no re-align
         no_chain:
@@ -181,10 +181,10 @@ def generateConfig():
         # Model-related options
         # if no input model is set, make this kind of model
         # choices: fiveState, fiveStateAsymmetric, threeState, threeStateAsymmetric
-        model_type:    fiveState
+        model_type: fiveState
 
         # randomly sample this amount of bases for EM
-        "max_sample_alignment_length": 50000
+        max_sample_alignment_length: 50000
 
         # perform this number of EM iterations
         em_iterations: 5
@@ -276,12 +276,11 @@ def main():
         run_parser = subparsers.add_parser("run", help="runs nanopore pipeline with config")
         subparsers.add_parser("generate", help="generates a config file for your run, do this first")
 
-        group = run_parser.add_mutually_exclusive_group()
-        group.add_argument('--config', default='config-toil-nanopore.yaml', type=str,
-                           help='Path to the (filled in) config file, generated with "generate".')
-        group.add_argument('--manifest', default='manifest-toil-nanopore.tsv', type=str,
-                           help='Path to the (filled in) manifest file, generated with "generate". '
-                                '\nDefault value: "%(default)s".')
+        run_parser.add_argument('--config', default='config-toil-nanopore.yaml', type=str,
+                                help='Path to the (filled in) config file, generated with "generate".')
+        run_parser.add_argument('--manifest', default='manifest-toil-nanopore.tsv', type=str,
+                                help='Path to the (filled in) manifest file, generated with "generate". '
+                                     '\nDefault value: "%(default)s".')
         Job.Runner.addToilOptions(run_parser)
 
         return parser.parse_args()
