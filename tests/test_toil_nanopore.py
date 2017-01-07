@@ -6,6 +6,8 @@ import os
 import subprocess
 import textwrap
 import unittest
+import pysam
+from itertools import izip
 from argparse import ArgumentParser
 
 
@@ -18,7 +20,7 @@ class SubprogramCiTests(unittest.TestCase):
         self.workdir    = os.path.join(baseDirectory(), "tests")
         self.toilscript = os.path.join(baseDirectory(), "toil-nanopore.py")
         self.test_reads = os.path.join(self.workdir, "reads.fq")
-        self.test_bam   = os.path.join(self.workdir, "bwa_chained_realign.bam")
+        self.test_bam   = os.path.join(self.workdir, "bwa_bam.bam")
         self.references = os.path.join(self.workdir, "references.fa")
         self.jobstore   = "testJobStore"
         self.test_model = os.path.join(self.workdir, "last_hmm_20.txt")
@@ -57,7 +59,7 @@ class SubprogramCiTests(unittest.TestCase):
                 learn_model:
                 signal:
                 gap_gamma:                   0.5
-                match_gamma:                 0.5
+                match_gamma:                 0.0
                 max_length_per_job:          700000
                 em_iterations:               5
                 model_type:                  fiveState
@@ -81,11 +83,11 @@ class SubprogramCiTests(unittest.TestCase):
     def fileUrlify(path_string):
         return "file://" + path_string
 
-    def tearDown(self):
-        def remove_if_there(f):
-            if self.is_file(f):
-                os.remove(f)
-        map(remove_if_there, self.crufty_files)
+    #def tearDown(self):
+    #    def remove_if_there(f):
+    #        if self.is_file(f):
+    #            os.remove(f)
+    #    map(remove_if_there, self.crufty_files)
 
     def generate_manifest(self):
         self.assertTrue(self.manifest_path is not None)
@@ -126,10 +128,22 @@ class SubprogramCiTests(unittest.TestCase):
             subprocess.check_call(command.split())
         except subprocess.CalledProcessError:
             self.assertTrue(False, "Command {} failed".format(command))
+    
+    def checkSamfile(self, observed, expected):
+        """compares one sam alignment against another fails if the alignments aren't the same
+        """
+        self.assertTrue(self.is_file(expected))
+        self.assertTrue(self.is_file(observed))
 
-    def testMarginAlign(self):
+        test_sam = pysam.Samfile(observed, 'r')
+        corr_sam = pysam.Samfile(expected, 'r')
+
+        for obs, exp in izip(test_sam, corr_sam):
+            self.assertTrue(obs.compare(exp) == 0)
+
+    def testMarginAlign(self, input_file, expected_alignment, no_realign="", no_chain=""):
         self.manifest_path   = os.path.join(self.workdir, "manifest_testMarginAlign.tsv")
-        self.manifest_string = "\t".join(["fq", ("file://" + self.test_reads)])
+        self.manifest_string = "\t".join(["fq", (self.fileUrlify(input_file))])
         self.generate_manifest()
         config_args = {
             "align"           : " True",
@@ -137,8 +151,8 @@ class SubprogramCiTests(unittest.TestCase):
             "stats"           : "",
             "ref"             : " {}".format(self.fileUrlify(self.references)),
             "out_sam"         : " {}".format(self.fileUrlify(self.out_sam)),
-            "no_chain"        : "",
-            "no_realign"      : "",
+            "no_chain"        : no_chain,
+            "no_realign"      : no_realign,
             "hmm_file"        : " {}".format(self.fileUrlify(self.test_model)),
             "EM"              : "",
             "out_model"       : "",
@@ -150,9 +164,18 @@ class SubprogramCiTests(unittest.TestCase):
         }
         self.config_path = os.path.join(self.workdir, "config_testMarginAlign.yaml")
         self.generate_config(config_args)
+        self.crufty_files.append(self.out_sam)
         self.run_pipe()
+        self.checkSamfile(self.out_sam, expected_alignment)
 
+    def testMarginAlignWithFastqInput(self):
+        expected_alignment = os.path.join(self.workdir, "bwa_chained_realign.sam")
+        self.assertTrue(self.is_file(expected_alignment))
+        self.testMarginAlign(self.test_reads, expected_alignment)
 
+    #def testMarginAlignWithBamInput(self):
+    #    self.testMarginAlign(self.test_bam)
+    
 
 
 def main():
@@ -161,9 +184,10 @@ def main():
     parser.add_argument("--show_stats", action="store_true", dest="show_stats", default=False, required=False)
     parser.add_argument("--debug", action="store_true", dest="debug", default=False, required=False)
     args = parser.parse_args()
-    
+
     testSuite = unittest.TestSuite()
-    testSuite.addTest(SubprogramCiTests("testMarginAlign"))
+    #testSuite.addTest(SubprogramCiTests("testMarginAlignWithBamInput"))
+    testSuite.addTest(SubprogramCiTests("testMarginAlignWithFastqInput"))
     testRunner = unittest.TextTestRunner(verbosity=1)
     testRunner.run(testSuite)
 
