@@ -83,11 +83,11 @@ class SubprogramCiTests(unittest.TestCase):
     def fileUrlify(path_string):
         return "file://" + path_string
 
-    #def tearDown(self):
-    #    def remove_if_there(f):
-    #        if self.is_file(f):
-    #            os.remove(f)
-    #    map(remove_if_there, self.crufty_files)
+    def tearDown(self):
+        def remove_if_there(f):
+            if self.is_file(f):
+                os.remove(f)
+        map(remove_if_there, self.crufty_files)
 
     def generate_manifest(self):
         self.assertTrue(self.manifest_path is not None)
@@ -128,7 +128,7 @@ class SubprogramCiTests(unittest.TestCase):
             subprocess.check_call(command.split())
         except subprocess.CalledProcessError:
             self.assertTrue(False, "Command {} failed".format(command))
-    
+
     def checkSamfile(self, observed, expected):
         """compares one sam alignment against another fails if the alignments aren't the same
         """
@@ -141,9 +141,10 @@ class SubprogramCiTests(unittest.TestCase):
         for obs, exp in izip(test_sam, corr_sam):
             self.assertTrue(obs.compare(exp) == 0)
 
-    def testMarginAlign(self, input_file, expected_alignment, no_realign="", no_chain=""):
-        self.manifest_path   = os.path.join(self.workdir, "manifest_testMarginAlign.tsv")
-        self.manifest_string = "\t".join(["fq", (self.fileUrlify(input_file))])
+    def testMarginAlign(self, input_file, input_type, expected_alignment,
+                        no_realign="", no_chain="", test_label=""):
+        self.manifest_path   = os.path.join(self.workdir, "manifest_{}.tsv".format(test_label))
+        self.manifest_string = "\t".join([input_type, (self.fileUrlify(input_file))])
         self.generate_manifest()
         config_args = {
             "align"           : " True",
@@ -171,10 +172,12 @@ class SubprogramCiTests(unittest.TestCase):
     def testMarginAlignWithFastqInput(self):
         expected_alignment = os.path.join(self.workdir, "bwa_chained_realign.sam")
         self.assertTrue(self.is_file(expected_alignment))
-        self.testMarginAlign(self.test_reads, expected_alignment)
+        self.testMarginAlign(self.test_reads, "fq", expected_alignment, test_label="testMarginAlignFastq")
 
-    #def testMarginAlignWithBamInput(self):
-    #    self.testMarginAlign(self.test_bam)
+    def testMarginAlignWithBamInput(self):
+        expected_alignment = os.path.join(self.workdir, "bwa_chained_realign.sam")
+        self.assertTrue(self.is_file(expected_alignment))
+        self.testMarginAlign(self.test_bam, "bam", expected_alignment, test_label="testMarginAlignBam")
     
 
 
@@ -186,8 +189,8 @@ def main():
     args = parser.parse_args()
 
     testSuite = unittest.TestSuite()
-    #testSuite.addTest(SubprogramCiTests("testMarginAlignWithBamInput"))
-    testSuite.addTest(SubprogramCiTests("testMarginAlignWithFastqInput"))
+    testSuite.addTest(SubprogramCiTests("testMarginAlignWithBamInput"))
+    #testSuite.addTest(SubprogramCiTests("testMarginAlignWithFastqInput"))
     testRunner = unittest.TextTestRunner(verbosity=1)
     testRunner.run(testSuite)
 
