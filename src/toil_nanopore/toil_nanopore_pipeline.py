@@ -70,18 +70,20 @@ def run_tool(job, config, sample):
     # cull the sample, which can be a fastq or a BAM
     bwa_alignment_fid = cull_sample_files()
 
-    # download the input model, if given. Fail if no model is given and we're performing HMM realignment.
-    if config["hmm_file"] is not None:
-        config["input_hmm_FileStoreID"] = job.addChildJobFn(download_url_job, config["hmm_file"], disk="10M").rv()
-    else:
-        if not config["no_realign"]:
-            require(config["EM"], "[run_tool]Need to specify an input model or set EM to "
-                                  "True to perform HMM realignment")
-        config["input_hmm_FileStoreID"] = None
+    # checks if we're doing alignments or variant calling
+    if config["align"] or config["caller"]:
+        # download the input model, if given. Fail if no model is given and we're performing HMM realignment.    
+        if config["hmm_file"] is not None:
+            config["input_hmm_FileStoreID"] = job.addChildJobFn(download_url_job, config["hmm_file"], disk="10M").rv()
+        else:
+            if not config["no_realign"]:
+                require(config["EM"], "[run_tool]Need to specify an input model or set EM to "
+                                      "True to perform HMM realignment")
+            config["input_hmm_FileStoreID"] = None
 
-    # initialize key in config for trained model if we're performing EM
-    if config["EM"]:
-        config["normalized_trained_model_FileStoreID"] = None
+        # initialize key in config for trained model if we're performing EM
+        if config["EM"]:
+            config["normalized_trained_model_FileStoreID"] = None
 
     # TODO refactor this out
     config["sample_label"]    = sample.URL

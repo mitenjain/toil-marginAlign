@@ -41,7 +41,7 @@ def chainSamFileJobFunction(job, config, aln_struct):
         if DEBUG:
             job.fileStore.logToMaster("[chainSamFileJobFunction]Not chaining SAM, passing {sam} "
                                       "on to realignment".format(sam=aln_struct.FileStoreID()))
-        job.addFollowOnJobFn(realignJobFunction, config, {"chain_alignment_output": aln_struct.FileStoreID()})
+        job.addFollowOnJobFn(realignJobFunction, config, aln_struct.FileStoreID())
 
     else:
         sam_file  = job.fileStore.readGlobalFile(aln_struct.FileStoreID())
