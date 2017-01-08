@@ -295,7 +295,7 @@ def main():
     if len(sys.argv) == 1:
         exitBadInput(print_help())
 
-    cwd = os.path.dirname(os.path.abspath(__file__))
+    cwd = os.getcwd()
 
     args = parse_args()
 
