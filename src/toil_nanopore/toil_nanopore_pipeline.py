@@ -101,7 +101,11 @@ def run_tool(job, config, sample):
         config["error_model_FileStoreID"] = job.addChildJobFn(download_url_job,
                                                               config["error_model"],
                                                               disk="10M").rv()
-        job.addFollowOnJobFn(marginCallerJobFunction, config, bwa_alignment_fid)
+        job.addFollowOnJobFn(marginCallerJobFunction, config, bwa_alignment_fid, "em")
+
+        no_margin_config = dict(**config)
+        no_margin_config["no_margin"] = True
+        job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, bwa_alignment_fid, "noMargin")
     elif config["stats"]:
         require(sample.file_type == "bam", "[run_tool]stats sub progam requires BAM input")
         job.addFollowOnJobFn(marginStatsJobFunction, config, bwa_alignment_fid)

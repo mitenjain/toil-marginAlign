@@ -82,7 +82,7 @@ def realignJobFunction(job, config, input_samfile_fid):
                                       "realignment")
 
     job.fileStore.logToMaster("[realignJobFunction]Going on to HMM realignment")
-    job.addFollowOnJobFn(realignSamFileJobFunction, config, input_samfile_fid)
+    job.addFollowOnJobFn(realignSamFileJobFunction, config, input_samfile_fid, "realigned")
 
 
 def main():

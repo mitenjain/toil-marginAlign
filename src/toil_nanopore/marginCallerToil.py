@@ -7,8 +7,8 @@ from margin.toil.variantCaller import \
     calculateAlignedPairsJobFunction, callVariantsWithAlignedPairsJobFunction
 
 
-def marginCallerJobFunction(job, config, input_samfile_fid):
+def marginCallerJobFunction(job, config, input_samfile_fid, output_label):
     require(input_samfile_fid is not None, "[marginCallerJobFunction]input_samfile_fid is NONE")
-    job.addFollowOnJobFn(shardSamJobFunction, config, input_samfile_fid, calculateAlignedPairsJobFunction,
-                         callVariantsWithAlignedPairsJobFunction)
+    job.addFollowOnJobFn(shardSamJobFunction, config, input_samfile_fid, output_label,
+                         calculateAlignedPairsJobFunction, callVariantsWithAlignedPairsJobFunction)
     # TODO add logic for folllOn stats job
