@@ -24,7 +24,6 @@ class SubprogramCiTests(unittest.TestCase):
     def setUp(self):
         self.workdir    = os.path.join(baseDirectory(), "tests")
         self.is_file    = os.path.exists
-        #self.toilscript = os.path.join(baseDirectory(), "toil-nanopore.py")
         self.test_reads = os.path.join(self.workdir, "reads.fq")
         self.test_bam   = os.path.join(self.workdir, "bwa_bam.bam")
         self.references = os.path.join(self.workdir, "references.fa")
@@ -134,7 +133,6 @@ class SubprogramCiTests(unittest.TestCase):
 
     def run_pipe(self):
         command_args = {
-            #"script"   : self.toilscript,
             "jobstore" : self.jobstore,
             "config"   : self.config_path,
             "manifest" : self.manifest_path,
@@ -364,15 +362,15 @@ class SubprogramCiTests(unittest.TestCase):
 def main():
     testSuite = unittest.TestSuite()
     testSuite.addTest(SubprogramCiTests("testMarginAlignWithBamInput"))
-    testSuite.addTest(SubprogramCiTests("testMarginAlignWithBamInputNoRealign"))
-    testSuite.addTest(SubprogramCiTests("testMarginAlignWithBamInputNoChain"))
-    testSuite.addTest(SubprogramCiTests("testMarginAlignWithFastqInputNoRealign"))
-    testSuite.addTest(SubprogramCiTests("testMarginAlignWithFastqInputNoChain"))
-    testSuite.addTest(SubprogramCiTests("testMarginAlignWithFastqInput"))
-    testSuite.addTest(SubprogramCiTests("testMarginAlignEmWithInputModel"))
-    testSuite.addTest(SubprogramCiTests("testMarginAlignEmWithBlankModel"))
+    #testSuite.addTest(SubprogramCiTests("testMarginAlignWithBamInputNoRealign"))
+    #testSuite.addTest(SubprogramCiTests("testMarginAlignWithBamInputNoChain"))
+    #testSuite.addTest(SubprogramCiTests("testMarginAlignWithFastqInputNoRealign"))
+    #testSuite.addTest(SubprogramCiTests("testMarginAlignWithFastqInputNoChain"))
+    #testSuite.addTest(SubprogramCiTests("testMarginAlignWithFastqInput"))
+    #testSuite.addTest(SubprogramCiTests("testMarginAlignEmWithInputModel"))
+    #testSuite.addTest(SubprogramCiTests("testMarginAlignEmWithBlankModel"))
     testSuite.addTest(SubprogramCiTests("testMarginCallerWithMarginalization"))
-    testSuite.addTest(SubprogramCiTests("testMarginCallerWithoutMarginalization"))
+    #testSuite.addTest(SubprogramCiTests("testMarginCallerWithoutMarginalization"))
     testSuite.addTest(SubprogramCiTests("testMarginStats"))
     
     testRunner = unittest.TextTestRunner(verbosity=1)

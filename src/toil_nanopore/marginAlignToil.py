@@ -12,9 +12,6 @@ from margin.toil.chainAlignment import chainSamFile
 from margin.toil.expectationMaximisation import performBaumWelchOnSamJobFunction
 
 
-DEBUG = True
-
-
 def baseDirectoryPath():
     return os.path.dirname(os.path.abspath(__file__)) + "/"
 
@@ -38,7 +35,7 @@ def bwaAlignJobFunction(job, config):
 def chainSamFileJobFunction(job, config, aln_struct):
     # Cull the files from the job store that we want
     if config["no_chain"]:
-        if DEBUG:
+        if config["debug"]:
             job.fileStore.logToMaster("[chainSamFileJobFunction]Not chaining SAM, passing {sam} "
                                       "on to realignment".format(sam=aln_struct.FileStoreID()))
         job.addFollowOnJobFn(realignJobFunction, config, aln_struct.FileStoreID())
@@ -49,7 +46,7 @@ def chainSamFileJobFunction(job, config, aln_struct):
         reads     = job.fileStore.readGlobalFile(config["sample_FileStoreID"])
         outputSam = job.fileStore.getLocalTempFileName()
 
-        if DEBUG:
+        if config["debug"]:
             job.fileStore.logToMaster("[chainSamFileJobFunction] chaining {bwa_out} (locally: {sam})"
                                       "".format(bwa_out=aln_struct.FileStoreID(), sam=sam_file))
 
@@ -64,7 +61,7 @@ def chainSamFileJobFunction(job, config, aln_struct):
 
 def realignJobFunction(job, config, input_samfile_fid):
     if config["no_realign"]:
-        if DEBUG:
+        if config["debug"]:
             job.fileStore.logToMaster("[realignJobFunction]no_realign set {realign}, exporting "
                                       "SAM to {out}".format(realign=config["no_realign"],
                                                             out=config["output_sam_path"]))
@@ -79,9 +76,8 @@ def realignJobFunction(job, config, input_samfile_fid):
                                       sam=input_samfile_fid,
                                       reads=config["sample_label"],
                                       reference=config["reference_label"]))
-        assert(config["output_model"] is not None), "[realignJobFunction]Need a place to put trained_model"
         job.addChildJobFn(performBaumWelchOnSamJobFunction, config, input_samfile_fid)
-        if DEBUG:
+        if config["debug"]:
             job.fileStore.logToMaster("[realignJobFunction]Finished EM using the trained model for "
                                       "realignment")
 

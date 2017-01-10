@@ -71,6 +71,7 @@ def run_tool(job, config, sample):
     bwa_alignment_fid = cull_sample_files()
 
     # checks if we're doing alignments or variant calling
+    # TODO this logic needs be to cleaned up
     if config["align"] or config["caller"]:
         # download the input model, if given. Fail if no model is given and we're performing HMM realignment.    
         if config["hmm_file"] is not None:
@@ -85,13 +86,12 @@ def run_tool(job, config, sample):
         if config["EM"]:
             config["normalized_trained_model_FileStoreID"] = None
 
-    # TODO refactor this out
-    config["sample_label"]    = sample.URL
+    config["sample_label"]    = sample.label
     config["reference_label"] = config["ref"]
+    job.fileStore.logToMaster("[run_tool]Processing sample:{}".format(config["sample_label"]))
 
     # Pipeline starts here
     if config["align"]:
-        require(config["output_sam_path"], "[run_tool]Output path for SAM required")
         job.addFollowOnJobFn(marginAlignJobFunction, config, bwa_alignment_fid)
     elif config["learn_model"]:
         raise NotImplementedError
@@ -104,7 +104,6 @@ def run_tool(job, config, sample):
         job.addFollowOnJobFn(marginCallerJobFunction, config, bwa_alignment_fid)
     elif config["stats"]:
         require(sample.file_type == "bam", "[run_tool]stats sub progam requires BAM input")
-        require(config["stats_outfile_url"], "[run_tool]did not provide output URL for stats")
         job.addFollowOnJobFn(marginStatsJobFunction, config, bwa_alignment_fid)
     elif config["signal"]:
         raise NotImplementedError
@@ -122,7 +121,7 @@ def marginAlignJobFunction(job, config, bwa_alignment_fid):
 
 
 def print_help():
-    """this is the help
+    """this is the help, add something helpful here soon...very soon
     """
     return print_help.__doc__
 
@@ -144,21 +143,20 @@ def generateConfig():
         # in that case the provided inputs will be checked at run time
         align:
         learn_model:
-        caller: True
+        caller: 
         stats:
         signal:
 
-        # Optional: Debug increasing logging
-        debug: True
-
         # Required: Reference fasta file
-        ref: file:///Users/Rand/projects/toil_dev/toil-marginAlign/tests/references.fa
+        ref: s3://arand-sandbox/references.fa
 
-        ## MarginAlign Options ##
-        # Required: Output location of sample. Can be full path to a directory or an s3:// URL
+        # Required: output directory for results to land in
         # Warning: S3 buckets must exist prior to upload or it will fail.
-        output_sam_path:
+        output_dir:
 
+        ##---------------------##
+        ## MarginAlign Options ##
+        ##---------------------##
         # all required options have default values
         gap_gamma:                     0.5
         match_gamma:                   0.0
@@ -170,21 +168,17 @@ def generateConfig():
         no_chain:
         no_realign:
 
-        # Optional: Alignment Model
-        hmm_file: file:///Users/Rand/projects/toil_dev/toil-marginAlign/tests/last_hmm_20.txt
+        # Optional: Alignment Model, n.b. this is required if you do not perform EM
+        hmm_file: s3://arand-sandbox/last_hmm_20.txt
 
         # EM options
         # Optional: set true to do EM
-        EM:
-
-        # Required: path to location of output model
-        output_model:
+        EM: True
 
         # Model-related options
         # if no input model is set, make this kind of model
         # choices: fiveState, fiveStateAsymmetric, threeState, threeStateAsymmetric
         model_type: fiveState
-
         # randomly sample this amount of bases for EM
         max_sample_alignment_length: 50000
 
@@ -200,20 +194,21 @@ def generateConfig():
         gc_content:      0.5
         train_emissions: True
 
+        ##----------------------##
         ## MarginCaller Options ##
-        # Required: path to VCF output
-        output_vcf_path: file:///Users/Rand/projects/toil_dev/toil-marginAlign/sandbox/testvcf.vcf
+        ##----------------------##
         # Required: Error model
-        error_model: file:///Users/Rand/projects/toil_dev/toil-marginAlign/tests/last_hmm_20.txt
+        error_model: s3://arand-sandbox/last_hmm_20.txt
 
         # Options
         # required options have default values filled in
         no_margin: False
         variant_threshold: 0.3
 
+        ##---------------------##
         ## MarginStats Options ##
+        ##---------------------##
         # all options are required, and have defaults except the output URL
-        stats_outfile_url: file:///Users/Rand/projects/toil_dev/toil-marginAlign/sandbox/stats.txt
         local_alignment:            False
         noStats:                    False
         printValuePerReadAlignment: True
@@ -223,6 +218,10 @@ def generateConfig():
         deletionsPerReadBase:       True
         insertionsPerReadBase:      True
         readLength:                 True
+
+        # Optional: Debug increasing logging
+        debug: True
+
     """[1:])
 
 
@@ -230,7 +229,7 @@ def generateManifest():
     return textwrap.dedent("""
         #   Edit this manifest to include information for each sample to be run.
         #
-        #   Lines should contain two tab-seperated fields: file_type and URL
+        #   Lines should contain three tab-seperated fields: file_type, URL, and sample_label
         #   file_type options:
         #       fq-gzp gzipped file of read sequences in FASTQ format
         #           fq file of read sequences in FASTQ format
@@ -240,9 +239,9 @@ def generateManifest():
         #       f5-tar tarball of MinION, basecalled, .fast5 files
         #   NOTE: as of 1/3/16 only fq implemented
         #   Eg:
-        #   fq-tar  file://path/to/file/reads.tar
-        #   f5-tar  s3://my-bucket/directory/
-        #   bam     file://path/to/giantbam.bam
+        #   fq-tar  file://path/to/file/reads.tar           some_reads
+        #   f5-tar  s3://my-bucket/directory/tarbal..tar    some_tar
+        #   bam     file://path/to/giantbam.bam             some_bam_alignment
         #   Place your samples below, one sample per line.
         """[1:])
 
@@ -250,19 +249,20 @@ def generateManifest():
 def parseManifest(path_to_manifest):
     require(os.path.exists(path_to_manifest), "[parseManifest]Didn't find manifest file, looked "
             "{}".format(path_to_manifest))
-    allowed_file_types = ["fq-gzp", "fq", "fa-gzp", "fa", "f5-tar", "bam"]
+    allowed_file_types = ["fq", "bam"]
+    #allowed_file_types = ["fq-gzp", "fq", "fa-gzp", "fa", "f5-tar", "bam"]
 
     def parse_line(line):
         # double check input, shouldn't need to though
         require(not line.isspace() and not line.startswith("#"), "[parse_line]Invalid {}".format(line))
         sample = line.strip().split("\t")
         # there should only be two entries, the file_type and the URL
-        require(len(sample) == 2, "[parse_line]Invalid, len(line) != 2, offending {}".format(line))
-        file_type, sample_url = sample
+        require(len(sample) == 3, "[parse_line]Invalid, len(line) != 3, offending {}".format(line))
+        file_type, sample_url, sample_label = sample
         # check the file_type and the URL
         require(file_type in allowed_file_types, "[parse_line]Unrecognized file type {}".format(file_type))
         require(urlparse(sample_url).scheme and urlparse(sample_url), "Invalid URL passed for {}".format(sample_url))
-        return Sample(file_type=file_type, URL=sample_url, file_id=None)
+        return Sample(file_type=file_type, URL=sample_url, file_id=None, label=sample_label)
 
     with open(path_to_manifest, "r") as fH:
         return map(parse_line, [x for x in fH if (not x.isspace() and not x.startswith("#"))])
