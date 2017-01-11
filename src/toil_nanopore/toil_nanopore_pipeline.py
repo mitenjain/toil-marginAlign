@@ -13,7 +13,6 @@ from toil.common import Toil
 from toil.job import Job
 from toil_lib import UserError, require
 from toil_lib.files import generate_file
-#from toil_lib.urls import download_url_job, download_url
 from toil_lib.programs import docker_call
 from margin.toil.localFileManager import LocalFile, urlDownload, urlDownlodJobFunction
 from margin.toil.alignment import AlignmentStruct, AlignmentFormat
@@ -43,9 +42,6 @@ def getFastqFromBam(job, bam_sample, samtools_image="quay.io/ucsc_cgl/samtools")
         docker_call(tool=samtools_image, parameters=samtools_parameters, work_dir=work_dir, outfile=fH)
 
     require(os.path.exists(fastq_reads.fullpathGetter()), "[getFastqFromBam]didn't generate reads")
-
-    #os.remove(local_bam.fullpathGetter())
-    #require(not os.path.exists(local_bam.fullpathGetter()), "[getFastqFromBam]didn't remove bam file")
 
     # upload fastq to fileStore
     return job.fileStore.writeGlobalFile(fastq_reads.fullpathGetter())
