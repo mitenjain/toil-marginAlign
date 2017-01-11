@@ -13,11 +13,10 @@ from toil.common import Toil
 from toil.job import Job
 from toil_lib import UserError, require
 from toil_lib.files import generate_file
-from toil_lib.urls import download_url_job, download_url
+#from toil_lib.urls import download_url_job, download_url
 from toil_lib.programs import docker_call
-from margin.toil.localFileManager import LocalFile
+from margin.toil.localFileManager import LocalFile, urlDownload, urlDownlodJobFunction
 from margin.toil.alignment import AlignmentStruct, AlignmentFormat
-from margin.toil.stats import marginStatsJobFunction
 
 from sample import Sample
 from marginAlignToil import bwaAlignJobFunction, chainSamFileJobFunction
@@ -31,22 +30,22 @@ def getFastqFromBam(job, bam_sample, samtools_image="quay.io/ucsc_cgl/samtools")
     uid           = uuid.uuid4().hex
     work_dir      = job.fileStore.getLocalTempDir()
     local_bam     = LocalFile(workdir=work_dir, filename="bam_{}.bam".format(uid))
-    bam_file_path = download_url(url=bam_sample.URL, work_dir=work_dir, name=local_bam.filenameGetter())
     fastq_reads   = LocalFile(workdir=work_dir, filename="fastq_reads{}.fq".format(uid))
 
-    require(os.path.exists(bam_file_path), "[getFastqFromBam]didn't download BAM")
-    require(bam_file_path == local_bam.fullpathGetter(), "[getFastqFromBam]bam_file_path != local_bam path")
+    urlDownload(parent_job=job, source_url=bam_sample.URL, destination_file=local_bam)
+
     require(not os.path.exists(fastq_reads.fullpathGetter()), "[getFastqFromBam]fastq file already exists")
 
     # run samtools to get the reads from the BAM
+    # TODO use DOCKER_DIR and clean this up. idea: make globls.py or something
     samtools_parameters = ["fastq", "/data/{}".format(local_bam.filenameGetter())]
     with open(fastq_reads.fullpathGetter(), 'w') as fH:
         docker_call(tool=samtools_image, parameters=samtools_parameters, work_dir=work_dir, outfile=fH)
 
     require(os.path.exists(fastq_reads.fullpathGetter()), "[getFastqFromBam]didn't generate reads")
 
-    os.remove(bam_file_path)
-    require(not os.path.exists(bam_file_path), "[getFastqFromBam]didn't remove bam file")
+    #os.remove(local_bam.fullpathGetter())
+    #require(not os.path.exists(local_bam.fullpathGetter()), "[getFastqFromBam]didn't remove bam file")
 
     # upload fastq to fileStore
     return job.fileStore.writeGlobalFile(fastq_reads.fullpathGetter())
@@ -55,29 +54,33 @@ def getFastqFromBam(job, bam_sample, samtools_image="quay.io/ucsc_cgl/samtools")
 def run_tool(job, config, sample):
     def cull_sample_files():
         if sample.file_type == "fq":
-            config["sample_FileStoreID"] = job.addChildJobFn(download_url_job, sample.URL, disk="1G").rv()
+                                                        # XXX need promise here            
+            config["sample_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction, sample.URL, disk="1G").rv()
             return None
         elif sample.file_type == "bam":
-            bwa_alignment_fid = job.addChildJobFn(download_url_job, sample.URL, disk="1G").rv()
+                                                        # XXX need promise here            
+            bwa_alignment_fid = job.addChildJobFn(urlDownlodJobFunction, sample.URL, disk="1G").rv()
+                                                        # XXX need promise here            
             config["sample_FileStoreID"] = job.addChildJobFn(getFastqFromBam, sample).rv()
             return bwa_alignment_fid
         else:
             require(False, "[cull_sample_files]Unsupported file type {}".format(sample.file_type))
 
     # download the reference
-    config["reference_FileStoreID"] = job.addChildJobFn(download_url_job, config["ref"], disk="1G").rv()
+                                                        # XXX need promise here
+    config["reference_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction, config["ref"], disk="1G").rv()
 
     # cull the sample, which can be a fastq or a BAM
     bwa_alignment_fid = cull_sample_files()
 
     # checks if we're doing alignments or variant calling
     # TODO this logic needs be to cleaned up
-    if config["align"] or config["caller"]:
+    if config["realign"] or config["caller"]:
         # download the input model, if given. Fail if no model is given and we're performing HMM realignment.    
         if config["hmm_file"] is not None:
-            config["input_hmm_FileStoreID"] = job.addChildJobFn(download_url_job, config["hmm_file"], disk="10M").rv()
+            config["input_hmm_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction, config["hmm_file"], disk="10M").rv()
         else:
-            if not config["no_realign"]:
+            if config["realign"]:
                 require(config["EM"], "[run_tool]Need to specify an input model or set EM to "
                                       "True to perform HMM realignment")
             config["input_hmm_FileStoreID"] = None
@@ -91,37 +94,67 @@ def run_tool(job, config, sample):
     job.fileStore.logToMaster("[run_tool]Processing sample:{}".format(config["sample_label"]))
 
     # Pipeline starts here
-    if config["align"]:
-        job.addFollowOnJobFn(marginAlignJobFunction, config, bwa_alignment_fid)
-    elif config["learn_model"]:
-        raise NotImplementedError
-    elif config["caller"]:
-        require(config["error_model"] is not None, "[run_tool]Caller subprogram requires an error model"
-                "None was given")
-        config["error_model_FileStoreID"] = job.addChildJobFn(download_url_job,
+    job.addFollowOnJobFn(marginAlignJobFunction, config, bwa_alignment_fid)
+
+
+def marginAlignJobFunction(job, config, input_alignment_fid):
+    if config["realign"] or config["chain"]:  # perform EM/Alignment/chaining if we're doing that
+        if input_alignment_fid is None:
+            job.addChildJobFn(bwaAlignJobFunction, config)
+        else:
+            aln_struct = AlignmentStruct(input_alignment_fid, AlignmentFormat.BAM)
+                                            # XXX need promise here (disk and memory)            
+            job.addChildJobFn(chainSamFileJobFunction, config, aln_struct)
+
+    job.addFollowOnJobFn(callVariantsAndGetStatsJobFunction, config, input_alignment_fid)
+
+
+def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
+    # we produce 3 VCF and Stats: 
+    #    1. chained or orig. alignment
+    #    2. realigned with margin 
+    #    3. realigned without margin
+    if config["EM"]:
+        job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using EM trained error model")
+        config["error_model_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction,
+                                                              (config["output_dir"] +
+                                                                  "{}_trainedmodel.hmm".format(config["sample_label"])),
+                                                              disk="10M").rv()
+    else:
+        job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using user-supplied error model")
+        require(config["error_model"],
+                "[callVariantsAndGetStatsJobFunction]Need to provide a error model if not performing EM")
+        config["error_model_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction,
                                                               config["error_model"],
                                                               disk="10M").rv()
-        job.addFollowOnJobFn(marginCallerJobFunction, config, bwa_alignment_fid, "em")
 
-        no_margin_config = dict(**config)
-        no_margin_config["no_margin"] = True
-        job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, bwa_alignment_fid, "noMargin")
-    elif config["stats"]:
-        require(sample.file_type == "bam", "[run_tool]stats sub progam requires BAM input")
-        job.addFollowOnJobFn(marginStatsJobFunction, config, bwa_alignment_fid)
-    elif config["signal"]:
-        raise NotImplementedError
+    # make a copy of the config and set noMargin to True for the chained and EM-noMargin variant calls
+    no_margin_config = dict(**config)
+    no_margin_config["no_margin"] = True
+
+    if config["chain"]:  # variant call the chained alignment
+        # TODO make this try/except
+        chained_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
+                                                  config["output_dir"] + "{}_chained.sam".format(config["sample_label"]),
+                                                  disk="1G").rv()  # TODO need promised requirement here
+        job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, chained_alignment_fid, "chained")
     else:
-        require(False, "[run_tool]No subprogram given")
+        job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, input_alignment_fid, "orig")
 
+    if config["realign"]:
+        # TODO need to make try/excelt here too
+        realigned_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
+                                                    (config["output_dir"] +
+                                                        "{}_realigned.sam".format(config["sample_label"])),
+                                                    disk="1G").rv()  # TODO need promised requirement here
 
-def marginAlignJobFunction(job, config, bwa_alignment_fid):
-    if bwa_alignment_fid is None:
-        job.addFollowOnJobFn(bwaAlignJobFunction, config)
-    else:
-        aln_struct = AlignmentStruct(bwa_alignment_fid, AlignmentFormat.BAM)
-        job.addFollowOnJobFn(chainSamFileJobFunction, config, aln_struct)
-    # TODO add logic for following on to marginCaller here
+        # handle the EM trained (potentially chained) alignment with marginalization in the variant calling
+        realign_em_label = "em" if config["chain"] else "emNoChain"
+        job.addFollowOnJobFn(marginCallerJobFunction, config, realigned_alignment_fid, realign_em_label)
+
+        # handle the same alignment without marginalization
+        realign_noMargin_label = "emNoMargin" if config["chain"] else "emNoMarginNoChain"
+        job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, realigned_alignment_fid, realign_noMargin_label)
 
 
 def print_help():
@@ -145,11 +178,10 @@ def generateConfig():
         ## Universal Options/Inputs ##
         # Required: Which subprograms to run, typically you run all 4, but you can run them piecemeal if you like
         # in that case the provided inputs will be checked at run time
-        align:
-        learn_model:
-        caller: 
+        chain:
+        realign:
+        caller:
         stats:
-        signal:
 
         # Required: Reference fasta file
         ref: s3://arand-sandbox/references.fa
@@ -167,10 +199,6 @@ def generateConfig():
 
         # total length (in nucleotides) that will be assigned to an HMM alignment job
         max_length_per_job:          700000
-
-        # Optional: no chain and/or no re-align
-        no_chain:
-        no_realign:
 
         # Optional: Alignment Model, n.b. this is required if you do not perform EM
         hmm_file: s3://arand-sandbox/last_hmm_20.txt
@@ -206,6 +234,7 @@ def generateConfig():
 
         # Options
         # required options have default values filled in
+        ## depreciate this!?
         no_margin: False
         variant_threshold: 0.3
 

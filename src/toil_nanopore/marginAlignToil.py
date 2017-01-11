@@ -6,9 +6,11 @@ import os
 from argparse import ArgumentParser
 from toil.job import Job
 from toil.common import Toil
+
 from margin.toil.bwa import bwa_docker_alignment_root
 from margin.toil.realign import realignSamFileJobFunction
 from margin.toil.chainAlignment import chainSamFile
+from margin.toil.localFileManager import LocalFile, deliverOutput
 from margin.toil.expectationMaximisation import performBaumWelchOnSamJobFunction
 
 
@@ -34,39 +36,39 @@ def bwaAlignJobFunction(job, config):
 
 def chainSamFileJobFunction(job, config, aln_struct):
     # Cull the files from the job store that we want
-    if config["no_chain"]:
-        if config["debug"]:
-            job.fileStore.logToMaster("[chainSamFileJobFunction]Not chaining SAM, passing {sam} "
-                                      "on to realignment".format(sam=aln_struct.FileStoreID()))
-        job.addFollowOnJobFn(realignJobFunction, config, aln_struct.FileStoreID())
+    if config["chain"] is None and config["realign"] is None:
+        job.fileStore.logToMaster("[chainSamFileJobFunction]Nothing to do.")
+        return
 
-    else:
-        sam_file  = job.fileStore.readGlobalFile(aln_struct.FileStoreID())
-        reference = job.fileStore.readGlobalFile(config["reference_FileStoreID"])
-        reads     = job.fileStore.readGlobalFile(config["sample_FileStoreID"])
-        outputSam = job.fileStore.getLocalTempFileName()
+    if config["chain"]:
+        sam_file   = job.fileStore.readGlobalFile(aln_struct.FileStoreID())
+        reference  = job.fileStore.readGlobalFile(config["reference_FileStoreID"])
+        reads      = job.fileStore.readGlobalFile(config["sample_FileStoreID"])
+        workdir    = job.fileStore.getLocalTempDir()
+        output_sam = LocalFile(workdir=workdir, filename="{}_chained.sam".format(config["sample_label"]))
 
         if config["debug"]:
             job.fileStore.logToMaster("[chainSamFileJobFunction] chaining {bwa_out} (locally: {sam})"
                                       "".format(bwa_out=aln_struct.FileStoreID(), sam=sam_file))
 
-        chainSamFile(samFile=sam_file,
-                     outputSamFile=outputSam,
+        chainSamFile(parent_job=job,
+                     samFile=sam_file,
+                     outputSamFile=output_sam.fullpathGetter(),
                      readFastqFile=reads,
                      referenceFastaFile=reference)
 
-        chainedSamFileId = job.fileStore.writeGlobalFile(outputSam)
+        chainedSamFileId = job.fileStore.writeGlobalFile(output_sam.fullpathGetter())
+        deliverOutput(job, output_sam, config["output_dir"])
         job.addFollowOnJobFn(realignJobFunction, config, chainedSamFileId)
+
+    else:
+        job.fileStore.logToMaster("[chainSamFileJobFunction]Not chaining SAM, passing {sam} "
+                                  "on to realignment".format(sam=aln_struct.FileStoreID()))
+        job.addFollowOnJobFn(realignJobFunction, config, aln_struct.FileStoreID())
 
 
 def realignJobFunction(job, config, input_samfile_fid):
-    if config["no_realign"]:
-        if config["debug"]:
-            job.fileStore.logToMaster("[realignJobFunction]no_realign set {realign}, exporting "
-                                      "SAM to {out}".format(realign=config["no_realign"],
-                                                            out=config["output_sam_path"]))
-
-        job.fileStore.exportFile(input_samfile_fid, config["output_sam_path"])
+    if config["realign"] is None:  # the chained SAM has already been delivered
         return
     if config["EM"]:
         # make a child job to perform the EM and generate and import the new model
@@ -82,7 +84,7 @@ def realignJobFunction(job, config, input_samfile_fid):
                                       "realignment")
 
     job.fileStore.logToMaster("[realignJobFunction]Going on to HMM realignment")
-    job.addFollowOnJobFn(realignSamFileJobFunction, config, input_samfile_fid, "realigned")
+    return job.addFollowOnJobFn(realignSamFileJobFunction, config, input_samfile_fid, "realigned").rv()
 
 
 def main():

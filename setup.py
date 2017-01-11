@@ -3,7 +3,7 @@
 from setuptools import setup, find_packages
 
 setup(name="toil-nanopore",
-      version="0.2.11",
+      version="0.2.12",
       description="Toil-script for performing MinION sequence analysis",
       author="Benedict Paten and Art Rand",
       author_email="benedict@soe.ucsc.edu, arand@soe.ucsc.edu",
