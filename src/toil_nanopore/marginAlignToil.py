@@ -78,11 +78,15 @@ def realignJobFunction(job, config, input_samfile_fid):
                                       sam=input_samfile_fid,
                                       reads=config["sample_label"],
                                       reference=config["reference_label"]))
-        job.addChildJobFn(performBaumWelchOnSamJobFunction, config, input_samfile_fid)
-        if config["debug"]:
-            job.fileStore.logToMaster("[realignJobFunction]Finished EM using the trained model for "
-                                      "realignment")
+        disk   = 2.5 * input_samfile_fid.size
+        memory = 6 * input_samfile_fid.size
+        job.fileStore.logToMaster("[realignJobFunction]Asking for disk {disk} and memory {mem}"
+                                  "".format(disk=disk, mem=memory))
+        job.addChildJobFn(performBaumWelchOnSamJobFunction, config, input_samfile_fid,
+                          disk=disk, memory=memory)
 
+    # need disk = ref_size + bam_size
+    # memory = ref_size(hash) + sam
     job.fileStore.logToMaster("[realignJobFunction]Going on to HMM realignment")
     return job.addFollowOnJobFn(realignSamFileJobFunction, config, input_samfile_fid, "realigned").rv()
 

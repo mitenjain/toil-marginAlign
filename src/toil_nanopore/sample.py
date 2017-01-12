@@ -1,3 +1,3 @@
 from collections import namedtuple
 
-Sample = namedtuple("Sample", ["file_type", "URL", "file_id", "label"])
+Sample = namedtuple("Sample", ["file_type", "URL", "label", "file_size"])

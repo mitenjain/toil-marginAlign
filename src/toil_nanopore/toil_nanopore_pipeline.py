@@ -9,6 +9,8 @@ import yaml
 import uuid
 from urlparse import urlparse
 
+from bd2k.util.humanize import human2bytes
+
 from toil.common import Toil
 from toil.job import Job
 from toil_lib import UserError, require
@@ -50,29 +52,25 @@ def getFastqFromBam(job, bam_sample, samtools_image="quay.io/ucsc_cgl/samtools")
 def run_tool(job, config, sample):
     def cull_sample_files():
         if sample.file_type == "fq":
-                                                        # XXX need promise here            
-            config["sample_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction, sample.URL, disk="1G").rv()
+            config["sample_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction, sample.URL, disk=sample.file_size).rv()
             return None
         elif sample.file_type == "bam":
-                                                        # XXX need promise here            
-            bwa_alignment_fid = job.addChildJobFn(urlDownlodJobFunction, sample.URL, disk="1G").rv()
-                                                        # XXX need promise here            
-            config["sample_FileStoreID"] = job.addChildJobFn(getFastqFromBam, sample).rv()
+            bwa_alignment_fid = job.addChildJobFn(urlDownlodJobFunction, sample.URL, disk=sample.file_size).rv()
+            config["sample_FileStoreID"] = job.addChildJobFn(getFastqFromBam, sample, disk=(2 * sample.file_size)).rv()
             return bwa_alignment_fid
         else:
             require(False, "[cull_sample_files]Unsupported file type {}".format(sample.file_type))
 
     # download the reference
-                                                        # XXX need promise here
-    config["reference_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction, config["ref"], disk="1G").rv()
+    config["reference_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction, config["ref"], disk=config["ref_size"]).rv()
 
     # cull the sample, which can be a fastq or a BAM
     bwa_alignment_fid = cull_sample_files()
 
     # checks if we're doing alignments or variant calling
-    # TODO this logic needs be to cleaned up
     if config["realign"] or config["caller"]:
-        # download the input model, if given. Fail if no model is given and we're performing HMM realignment.    
+        # download the input model, if given. Fail if no model is given and we're performing HMM realignment without
+        # doing EM
         if config["hmm_file"] is not None:
             config["input_hmm_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction, config["hmm_file"], disk="10M").rv()
         else:
@@ -99,8 +97,8 @@ def marginAlignJobFunction(job, config, input_alignment_fid):
             job.addChildJobFn(bwaAlignJobFunction, config)
         else:
             aln_struct = AlignmentStruct(input_alignment_fid, AlignmentFormat.BAM)
-                                            # XXX need promise here (disk and memory)            
-            job.addChildJobFn(chainSamFileJobFunction, config, aln_struct)
+            job.fileStore.logToMaster("[marginAlignJobFunction]Asking for {} memory".format(6 * input_alignment_fid.size))
+            job.addChildJobFn(chainSamFileJobFunction, config, aln_struct, memory=(6 * input_alignment_fid.size))
 
     job.addFollowOnJobFn(callVariantsAndGetStatsJobFunction, config, input_alignment_fid)
 
@@ -132,7 +130,7 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
         # TODO make this try/except
         chained_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
                                                   config["output_dir"] + "{}_chained.sam".format(config["sample_label"]),
-                                                  disk="1G").rv()  # TODO need promised requirement here
+                                                  disk=input_alignment_fid.size).rv()  # TODO need promised requirement here
         job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, chained_alignment_fid, "chained")
     else:
         job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, input_alignment_fid, "orig")
@@ -174,34 +172,38 @@ def generateConfig():
         ## Universal Options/Inputs ##
         # Required: Which subprograms to run, typically you run all 4, but you can run them piecemeal if you like
         # in that case the provided inputs will be checked at run time
-        chain:
-        realign:
-        caller:
-        stats:
+        chain:   True
+        realign: True
+        caller:  True
+        stats:   True
+
+        # Optional: set true to do EM
+        EM:      True
 
         # Required: Reference fasta file
-        ref: s3://arand-sandbox/references.fa
+        ref:      s3://arand-sandbox/references.fa
+        ref_size: 10M
 
         # Required: output directory for results to land in
         # Warning: S3 buckets must exist prior to upload or it will fail.
-        output_dir:
+        output_dir: s3://arand-sandbox/
 
         ##---------------------##
         ## MarginAlign Options ##
         ##---------------------##
         # all required options have default values
-        gap_gamma:                     0.5
-        match_gamma:                   0.0
+        gap_gamma:   0.5
+        match_gamma: 0.0
 
         # total length (in nucleotides) that will be assigned to an HMM alignment job
-        max_length_per_job:          700000
+        max_length_per_job: 700000
 
         # Optional: Alignment Model, n.b. this is required if you do not perform EM
         hmm_file: s3://arand-sandbox/last_hmm_20.txt
 
-        # EM options
-        # Optional: set true to do EM
-        EM: True
+        #------------#
+        # EM options #
+        #------------#
 
         # Model-related options
         # if no input model is set, make this kind of model
@@ -258,7 +260,8 @@ def generateManifest():
     return textwrap.dedent("""
         #   Edit this manifest to include information for each sample to be run.
         #
-        #   Lines should contain three tab-seperated fields: file_type, URL, and sample_label
+        #   Lines should contain three tab-seperated fields: file_type, URL,
+        #   sample_label, and sample file size
         #   file_type options:
         #       fq-gzp gzipped file of read sequences in FASTQ format
         #           fq file of read sequences in FASTQ format
@@ -268,9 +271,9 @@ def generateManifest():
         #       f5-tar tarball of MinION, basecalled, .fast5 files
         #   NOTE: as of 1/3/16 only fq implemented
         #   Eg:
-        #   fq-tar  file://path/to/file/reads.tar           some_reads
-        #   f5-tar  s3://my-bucket/directory/tarbal..tar    some_tar
-        #   bam     file://path/to/giantbam.bam             some_bam_alignment
+        #   fq-tar  file://path/to/file/reads.tar           some_reads  10G
+        #   f5-tar  s3://my-bucket/directory/tarbal..tar    some_tar    10G
+        #   bam     file://path/to/giantbam.bam             some_bam_alignment 20G
         #   Place your samples below, one sample per line.
         """[1:])
 
@@ -286,12 +289,12 @@ def parseManifest(path_to_manifest):
         require(not line.isspace() and not line.startswith("#"), "[parse_line]Invalid {}".format(line))
         sample = line.strip().split("\t")
         # there should only be two entries, the file_type and the URL
-        require(len(sample) == 3, "[parse_line]Invalid, len(line) != 3, offending {}".format(line))
-        file_type, sample_url, sample_label = sample
+        require(len(sample) == 4, "[parse_line]Invalid, len(line) != 3, offending {}".format(line))
+        file_type, sample_url, sample_label, sample_filesize = sample
         # check the file_type and the URL
         require(file_type in allowed_file_types, "[parse_line]Unrecognized file type {}".format(file_type))
         require(urlparse(sample_url).scheme and urlparse(sample_url), "Invalid URL passed for {}".format(sample_url))
-        return Sample(file_type=file_type, URL=sample_url, file_id=None, label=sample_label)
+        return Sample(file_type=file_type, URL=sample_url, label=sample_label, file_size=human2bytes(sample_filesize))
 
     with open(path_to_manifest, "r") as fH:
         return map(parse_line, [x for x in fH if (not x.isspace() and not x.startswith("#"))])
