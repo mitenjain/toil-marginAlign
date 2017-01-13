@@ -115,9 +115,9 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
                                                               Hmm.modelFilename(global_config=config, get_url=True),
                                                               disk="10M").rv()
     else:
-        job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using user-supplied error model")
         require(config["error_model"],
                 "[callVariantsAndGetStatsJobFunction]Need to provide a error model if not performing EM")
+        job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using user-supplied error model")
         config["error_model_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction,
                                                               config["error_model"],
                                                               disk="10M").rv()
@@ -143,11 +143,12 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
                                                     disk="1G").rv()  # TODO need promised requirement here
 
         # handle the EM trained (potentially chained) alignment with marginalization in the variant calling
-        realign_em_label = "em" if config["chain"] else "emNoChain"
+        em_label = "em" if config["EM"] else ""
+        realign_em_label = em_label + "Realign" if config["chain"] else em_label + "RealignNoChain"
         job.addFollowOnJobFn(marginCallerJobFunction, config, realigned_alignment_fid, realign_em_label)
 
         # handle the same alignment without marginalization
-        realign_noMargin_label = "emNoMargin" if config["chain"] else "emNoMarginNoChain"
+        realign_noMargin_label = em_label + "RealignNoMargin" if config["chain"] else em_label + "RealignNoMarginNoChain"
         job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, realigned_alignment_fid, realign_noMargin_label)
 
 
