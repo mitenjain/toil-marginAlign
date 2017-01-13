@@ -17,6 +17,7 @@ from toil_lib import UserError, require
 from toil_lib.files import generate_file
 from toil_lib.programs import docker_call
 from margin.toil.localFileManager import LocalFile, urlDownload, urlDownlodJobFunction
+from margin.toil.hmm import Hmm
 from margin.toil.alignment import AlignmentStruct, AlignmentFormat
 
 from sample import Sample
@@ -111,8 +112,7 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
     if config["EM"]:
         job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using EM trained error model")
         config["error_model_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction,
-                                                              (config["output_dir"] +
-                                                                  "{}_trainedmodel.hmm".format(config["sample_label"])),
+                                                              Hmm.modelFilename(global_config=config, get_url=True),
                                                               disk="10M").rv()
     else:
         job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using user-supplied error model")
