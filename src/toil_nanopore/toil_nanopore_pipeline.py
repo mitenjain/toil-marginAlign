@@ -230,7 +230,7 @@ def generateConfig():
         ##----------------------##
         # Required: Error model
         error_model: s3://arand-sandbox/last_hmm_20.txt
-
+        max_variant_call_positions_per_job: 1000
         # Options
         # required options have default values filled in
         ## depreciate this!?
