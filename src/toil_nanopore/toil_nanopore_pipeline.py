@@ -109,6 +109,7 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
     #    1. chained or orig. alignment
     #    2. realigned with margin 
     #    3. realigned without margin
+    # Handle downloading the error model
     if config["EM"]:
         job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using EM trained error model")
         config["error_model_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction,
@@ -122,11 +123,19 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
                                                               config["error_model"],
                                                               disk="10M").rv()
 
+    if config["chain"] is None and config["realign"] is None:  # we're just variant calling with the supplied model
+        margin_label = "noMargin" if config["no_margin"] else "margin"
+        job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Calling variants with model {model} "
+                                  "no margin is {margin}".format(model=config["error_model"], margin=config["no_margin"]))
+        job.addFollowOnJobFn(marginCallerJobFunction, config, input_alignment_fid, margin_label)
+        return
+
     # make a copy of the config and set noMargin to True for the chained and EM-noMargin variant calls
     no_margin_config = dict(**config)
     no_margin_config["no_margin"] = True
 
     if config["chain"]:  # variant call the chained alignment
+        ## XXX make chained_config with special params
         # TODO make this try/except
         chained_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
                                                   config["output_dir"] + "{}_chained.sam".format(config["sample_label"]),
