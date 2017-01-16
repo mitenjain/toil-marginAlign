@@ -105,24 +105,22 @@ def marginAlignJobFunction(job, config, input_alignment_fid):
 
 
 def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
-    # we produce 3 VCF and Stats: 
-    #    1. chained or orig. alignment
-    #    2. realigned with margin 
-    #    3. realigned without margin
-    # Handle downloading the error model
-    if config["EM"]:
+    # handle downloading the error model, use the EM trained model, if we did EM
+    if config["EM"] is not None and config["realign"] is not None:
         job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using EM trained error model")
         config["error_model_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction,
                                                               Hmm.modelFilename(global_config=config, get_url=True),
                                                               disk="10M").rv()
-    else:
+    else:  # use the user provided one
         require(config["error_model"],
                 "[callVariantsAndGetStatsJobFunction]Need to provide a error model if not performing EM")
-        job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using user-supplied error model")
+        job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using user-supplied error model "
+                                  "from {}".format(config["error_model"]))
         config["error_model_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction,
                                                               config["error_model"],
                                                               disk="10M").rv()
 
+    # if we're just variant calling a supplied BAM go here with the downloaded model
     if config["chain"] is None and config["realign"] is None:  # we're just variant calling with the supplied model
         margin_label = "noMargin" if config["no_margin"] else "margin"
         job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Calling variants with model {model} "
@@ -130,22 +128,18 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
         job.addFollowOnJobFn(marginCallerJobFunction, config, input_alignment_fid, margin_label)
         return
 
-    # make a copy of the config and set noMargin to True for the chained and EM-noMargin variant calls
-    no_margin_config = dict(**config)
-    no_margin_config["no_margin"] = True
-
     if config["chain"]:  # variant call the chained alignment
-        ## XXX make chained_config with special params
-        # TODO make this try/except
+        chained_config = dict(**config)
+        chained_config["no_margin"] = True
+        chained_config["stats"]     = True
         chained_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
                                                   config["output_dir"] + "{}_chained.sam".format(config["sample_label"]),
-                                                  disk=input_alignment_fid.size).rv()  # TODO need promised requirement here
-        job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, chained_alignment_fid, "chained")
+                                                  disk=input_alignment_fid.size).rv()
+        job.addFollowOnJobFn(marginCallerJobFunction, chained_config, chained_alignment_fid, "chained")
     else:
-        job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, input_alignment_fid, "orig")
+        job.addFollowOnJobFn(marginCallerJobFunction, chained_config, input_alignment_fid, "")
 
     if config["realign"]:
-        # TODO need to make try/excelt here too
         realigned_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
                                                     (config["output_dir"] +
                                                         "{}_realigned.sam".format(config["sample_label"])),
@@ -157,6 +151,10 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
         job.addFollowOnJobFn(marginCallerJobFunction, config, realigned_alignment_fid, realign_em_label)
 
         # handle the same alignment without marginalization
+        no_margin_config = dict(**config)
+        no_margin_config["no_margin"] = True
+        no_margin_config["stats"]     = False  # don't need to redo this
+
         realign_noMargin_label = em_label + "RealignNoMargin" if config["chain"] else em_label + "RealignNoMarginNoChain"
         job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, realigned_alignment_fid, realign_noMargin_label)
 
@@ -205,8 +203,11 @@ def generateConfig():
         gap_gamma:   0.5
         match_gamma: 0.0
 
+        # batching/sharding options, only change the values below if you know what you're doing
         # total length (in nucleotides) that will be assigned to an HMM alignment job
-        max_length_per_job: 700000
+        max_alignment_length_per_job:    700000
+        max_alignments_per_job:          250
+        cut_batch_at_alignment_this_big: 20000
 
         # Optional: Alignment Model, n.b. this is required if you do not perform EM
         hmm_file: s3://arand-sandbox/last_hmm_20.txt
@@ -239,10 +240,11 @@ def generateConfig():
         ##----------------------##
         # Required: Error model
         error_model: s3://arand-sandbox/last_hmm_20.txt
+
+        # batch/sharding option, smaller numbers will spawn large numbers of jobs
         max_variant_call_positions_per_job: 1000
         # Options
-        # required options have default values filled in
-        ## depreciate this!?
+        # no_margin option, don't change unless you're only doing variant calling
         no_margin: False
         variant_threshold: 0.3
 
@@ -262,7 +264,6 @@ def generateConfig():
 
         # Optional: Debug increasing logging
         debug: True
-
     """[1:])
 
 
