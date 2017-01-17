@@ -101,7 +101,11 @@ def marginAlignJobFunction(job, config, input_alignment_fid):
             job.fileStore.logToMaster("[marginAlignJobFunction]Asking for {} memory".format(6 * input_alignment_fid.size))
             job.addChildJobFn(chainSamFileJobFunction, config, aln_struct, memory=(6 * input_alignment_fid.size))
 
-    job.addFollowOnJobFn(callVariantsAndGetStatsJobFunction, config, input_alignment_fid)
+    if config["caller"]:
+        job.addFollowOnJobFn(callVariantsAndGetStatsJobFunction, config, input_alignment_fid)
+        return
+    if config["stats"]:
+        raise NotImplementedError
 
 
 def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
@@ -205,6 +209,7 @@ def generateConfig():
 
         # batching/sharding options, only change the values below if you know what you're doing
         # total length (in nucleotides) that will be assigned to an HMM alignment job
+        split_alignments_to_this_many:   10
         max_alignment_length_per_job:    700000
         max_alignments_per_job:          250
         cut_batch_at_alignment_this_big: 20000

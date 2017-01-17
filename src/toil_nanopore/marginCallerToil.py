@@ -3,18 +3,36 @@
 from __future__ import print_function
 from toil_lib import require
 from margin.toil.realign import shardSamJobFunction
-from margin.toil.variantCaller import \
-    calculateAlignedPairsJobFunction, callVariantsWithAlignedPairsJobFunction
+from margin.toil.variantCaller import\
+    calculateAlignedPairsJobFunction,\
+    callVariantsWithAlignedPairsJobFunction,\
+    marginalizePosteriorProbsJobFunction
+from margin.toil.alignment import splitLargeAlignment
 from margin.toil.stats import marginStatsJobFunction
 
 
 def marginCallerJobFunction(job, config, input_samfile_fid, output_label):
     require(input_samfile_fid is not None, "[marginCallerJobFunction]input_samfile_fid is NONE")
-    disk   = input_samfile_fid.size + config["reference_FileStoreID"].size
-    memory = (6 * input_samfile_fid.size)
-    job.addFollowOnJobFn(shardSamJobFunction, config, input_samfile_fid, output_label,
-                         calculateAlignedPairsJobFunction, callVariantsWithAlignedPairsJobFunction,
-                         disk=disk, memory=memory)
+    # split up the large alignment
+    smaller_alns = splitLargeAlignment(job, config, input_samfile_fid)
+    expectations = []
+    # this loop runs through the smaller alignments and sets a child job to get the aligned pairs for 
+    # each one. then it marginalizes over the columns in the alignment and adds a promise of a dict containing
+    # the posteriors to the list `expctations`
+    for aln in smaller_alns:
+        disk   = aln.size + config["reference_FileStoreID"].size
+        memory = (6 * aln.size)
+        position_expectations = job.addChildJobFn(shardSamJobFunction,
+                                                  config, aln,
+                                                  calculateAlignedPairsJobFunction,
+                                                  marginalizePosteriorProbsJobFunction,
+                                                  disk=disk, memory=memory).rv()
+        expectations.append(position_expectations)
+
+    # next we need to set a followOn job that reduces the expectations at each position into one dict
+    job.addFollowOnJobFn(callVariantsWithAlignedPairsJobFunction, config, input_samfile_fid,
+                         output_label, expectations)
+
     if config["stats"]:
         job.addFollowOnJobFn(marginStatsJobFunction, config, input_samfile_fid, output_label,
                              memory=input_samfile_fid.size)
