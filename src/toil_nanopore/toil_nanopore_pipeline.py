@@ -209,9 +209,9 @@ def generateConfig():
 
         # batching/sharding options, only change the values below if you know what you're doing
         # total length (in nucleotides) that will be assigned to an HMM alignment job
-        split_alignments_to_this_many:   10
+        split_alignments_to_this_many:   1000
         max_alignment_length_per_job:    700000
-        max_alignments_per_job:          250
+        max_alignments_per_job:          300
         cut_batch_at_alignment_this_big: 20000
 
         # Optional: Alignment Model, n.b. this is required if you do not perform EM
@@ -247,7 +247,7 @@ def generateConfig():
         error_model: s3://arand-sandbox/last_hmm_20.txt
 
         # batch/sharding option, smaller numbers will spawn large numbers of jobs
-        max_variant_call_positions_per_job: 1000
+        max_variant_call_positions_per_job: 100000
         # Options
         # no_margin option, don't change unless you're only doing variant calling
         no_margin: False
