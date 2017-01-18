@@ -82,7 +82,7 @@ def realignJobFunction(job, config, input_samfile_fid):
 
     # need disk = ref_size + bam_size
     # memory = ref_size(hash) + sam
-    job.fileStore.logToMaster("[realignJobFunction]Queueing on to HMM realignment")
+    job.fileStore.logToMaster("[realignJobFunction]Queueing up HMM realignment")
     return job.addFollowOnJobFn(realignSamFileJobFunction, config, input_samfile_fid, "realigned").rv()
 
 

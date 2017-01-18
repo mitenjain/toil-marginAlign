@@ -5,7 +5,7 @@ from toil_lib import require
 from margin.toil.realign import shardSamJobFunction
 from margin.toil.variantCaller import\
     calculateAlignedPairsJobFunction,\
-    callVariantsWithAlignedPairsJobFunction,\
+    callVariantsWithAlignedPairsJobFunction1,\
     marginalizePosteriorProbsJobFunction
 from margin.toil.alignment import splitLargeAlignment
 from margin.toil.stats import marginStatsJobFunction
@@ -29,9 +29,7 @@ def marginCallerJobFunction(job, config, input_samfile_fid, output_label):
                                                   disk=disk, memory=memory).rv()
         expectations.append(position_expectations)
 
-    # next we need to set a followOn job that reduces the expectations at each position into one dict
-    job.addFollowOnJobFn(callVariantsWithAlignedPairsJobFunction, config, input_samfile_fid,
-                         output_label, expectations)
+    job.addFollowOnJobFn(callVariantsWithAlignedPairsJobFunction1, config, expectations, output_label)
 
     if config["stats"]:
         job.addFollowOnJobFn(marginStatsJobFunction, config, input_samfile_fid, output_label,
