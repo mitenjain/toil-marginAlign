@@ -42,7 +42,7 @@ def getFastqFromBam(job, bam_sample, samtools_image="quay.io/ucsc_cgl/samtools")
     # TODO use DOCKER_DIR and clean this up. idea: make globls.py or something
     samtools_parameters = ["fastq", "/data/{}".format(local_bam.filenameGetter())]
     with open(fastq_reads.fullpathGetter(), 'w') as fH:
-        docker_call(tool=samtools_image, parameters=samtools_parameters, work_dir=work_dir, outfile=fH)
+        docker_call(job=job, tool=samtools_image, parameters=samtools_parameters, work_dir=work_dir, outfile=fH)
 
     require(os.path.exists(fastq_reads.fullpathGetter()), "[getFastqFromBam]didn't generate reads")
 
@@ -105,7 +105,7 @@ def marginAlignJobFunction(job, config, input_alignment_fid):
         job.addFollowOnJobFn(callVariantsAndGetStatsJobFunction, config, input_alignment_fid)
         return
     if config["stats"]:
-        raise NotImplementedError
+        require(False, "-->Art still needs to put the correct function here")
 
 
 def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
@@ -125,11 +125,12 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
                                                               disk="10M").rv()
 
     # if we're just variant calling a supplied BAM go here with the downloaded model
-    if config["chain"] is None and config["realign"] is None:  # we're just variant calling with the supplied model
+    if config["chain"] is None and config["realign"] is None: 
         margin_label = "noMargin" if config["no_margin"] else "margin"
         job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Calling variants with model {model} "
                                   "no margin is {margin}".format(model=config["error_model"], margin=config["no_margin"]))
-        job.addFollowOnJobFn(marginCallerJobFunction, config, input_alignment_fid, margin_label)
+        job.addFollowOnJobFn(marginCallerJobFunction, config, input_alignment_fid, margin_label,
+                             disk=(3 * input_alignment_fid.size))
         return
 
     if config["chain"]:  # variant call the chained alignment

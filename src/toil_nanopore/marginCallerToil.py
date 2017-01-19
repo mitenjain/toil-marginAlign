@@ -9,13 +9,15 @@ from margin.toil.variantCaller import\
     marginalizePosteriorProbsJobFunction
 from margin.toil.alignment import splitLargeAlignment
 from margin.toil.stats import marginStatsJobFunction
+from margin.toil.hmm import downloadHmm
 
 
 def marginCallerJobFunction(job, config, input_samfile_fid, output_label):
     require(input_samfile_fid is not None, "[marginCallerJobFunction]input_samfile_fid is NONE")
     # split up the large alignment
-    smaller_alns = splitLargeAlignment(job, config, input_samfile_fid)
-    expectations = []
+    smaller_alns        = splitLargeAlignment(job, config, input_samfile_fid)
+    expectations        = []
+    hidden_markov_model = downloadHmm(job, config)
     # this loop runs through the smaller alignments and sets a child job to get the aligned pairs for 
     # each one. then it marginalizes over the columns in the alignment and adds a promise of a dict containing
     # the posteriors to the list `expctations`
@@ -23,12 +25,13 @@ def marginCallerJobFunction(job, config, input_samfile_fid, output_label):
         disk   = aln.size + config["reference_FileStoreID"].size
         memory = (6 * aln.size)
         position_expectations = job.addChildJobFn(shardSamJobFunction,
-                                                  config, aln,
+                                                  config, aln, hidden_markov_model,
                                                   calculateAlignedPairsJobFunction,
                                                   marginalizePosteriorProbsJobFunction,
                                                   disk=disk, memory=memory).rv()
         expectations.append(position_expectations)
-
+    # XXX TODO need a resource requirement here
+    # the chr22 reduce used up 
     job.addFollowOnJobFn(callVariantsWithAlignedPairsJobFunction1, config, expectations, output_label)
 
     if config["stats"]:
