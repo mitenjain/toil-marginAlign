@@ -45,7 +45,7 @@ def chainSamFileJobFunction(job, config, aln_struct):
         reference  = job.fileStore.readGlobalFile(config["reference_FileStoreID"])
         reads      = job.fileStore.readGlobalFile(config["sample_FileStoreID"])
         workdir    = job.fileStore.getLocalTempDir()
-        output_sam = LocalFile(workdir=workdir, filename="{}_chained.sam".format(config["sample_label"]))
+        output_sam = LocalFile(workdir=workdir, filename="{}_chained.bam".format(config["sample_label"]))
 
         if config["debug"]:
             job.fileStore.logToMaster("[chainSamFileJobFunction] chaining {bwa_out} (locally: {sam})"

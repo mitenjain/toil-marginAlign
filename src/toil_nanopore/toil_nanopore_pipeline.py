@@ -125,7 +125,7 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
                                                               disk="10M").rv()
 
     # if we're just variant calling a supplied BAM go here with the downloaded model
-    if config["chain"] is None and config["realign"] is None: 
+    if config["chain"] is None and config["realign"] is None:
         margin_label = "noMargin" if config["no_margin"] else "margin"
         job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Calling variants with model {model} "
                                   "no margin is {margin}".format(model=config["error_model"], margin=config["no_margin"]))
@@ -138,7 +138,7 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
         chained_config["no_margin"] = True
         chained_config["stats"]     = True
         chained_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
-                                                  config["output_dir"] + "{}_chained.sam".format(config["sample_label"]),
+                                                  config["output_dir"] + "{}_chained.bam".format(config["sample_label"]),
                                                   disk=input_alignment_fid.size).rv()
         job.addFollowOnJobFn(marginCallerJobFunction, chained_config, chained_alignment_fid, "chained")
     else:
@@ -147,9 +147,10 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
     if config["realign"]:
         realigned_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
                                                     (config["output_dir"] +
-                                                        "{}_realigned.sam".format(config["sample_label"])),
+                                                        "{}_realigned.bam".format(config["sample_label"])),
                                                     disk="1G").rv()  # TODO need promised requirement here
 
+        # TODO move the shardAlignmentsByRegion to HERE instead of within marginCallerJobFunction
         # handle the EM trained (potentially chained) alignment with marginalization in the variant calling
         em_label = "em" if config["EM"] else ""
         realign_em_label = em_label + "Realign" if config["chain"] else em_label + "RealignNoChain"
@@ -210,6 +211,7 @@ def generateConfig():
 
         # batching/sharding options, only change the values below if you know what you're doing
         # total length (in nucleotides) that will be assigned to an HMM alignment job
+        split_chromosome_this_length:    1000000
         split_alignments_to_this_many:   1000
         max_alignment_length_per_job:    700000
         max_alignments_per_job:          300
