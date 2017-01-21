@@ -6,7 +6,7 @@ from margin.toil.realign import shardSamJobFunction
 from margin.toil.variantCaller import\
     calculateAlignedPairsJobFunction,\
     marginalizePosteriorProbsJobFunction
-from margin.toil.variantCall import makeVcfFromVariantCalls
+from margin.toil.variantCall import makeVcfFromVariantCallsJobFunction2
 from margin.toil.alignment import shardAlignmentByRegion
 from margin.toil.stats import marginStatsJobFunction
 from margin.toil.hmm import downloadHmm
@@ -33,7 +33,7 @@ def marginCallerJobFunction(job, config, input_samfile_fid, output_label):
                                           disk=disk, memory=memory).rv()
         all_variant_calls.append(variant_calls)
 
-    job.addFollowOnJobFn(makeVcfFromVariantCalls, config, all_variant_calls, output_label)
+    job.addFollowOnJobFn(makeVcfFromVariantCallsJobFunction2, config, all_variant_calls, output_label)
 
     if config["stats"]:
         job.addFollowOnJobFn(marginStatsJobFunction, config, input_samfile_fid, output_label,
