@@ -109,6 +109,9 @@ def marginAlignJobFunction(job, config, input_alignment_fid):
 
 
 def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
+
+    # XXX TODO  put the shardAlignment jobFunct here XXX
+
     # handle downloading the error model, use the EM trained model, if we did EM
     if config["EM"] is not None and config["realign"] is not None:
         job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using EM trained error model")
