@@ -18,7 +18,7 @@ from toil_lib.files import generate_file
 from toil_lib.programs import docker_call
 from margin.toil.localFileManager import LocalFile, urlDownload, urlDownlodJobFunction
 from margin.toil.hmm import Hmm
-from margin.toil.alignment import AlignmentStruct, AlignmentFormat
+from margin.toil.alignment import AlignmentStruct, AlignmentFormat, shardAlignmentByRegionJobFunction
 
 from sample import Sample
 from marginAlignToil import bwaAlignJobFunction, chainSamFileJobFunction
@@ -110,8 +110,6 @@ def marginAlignJobFunction(job, config, input_alignment_fid):
 
 def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
 
-    # XXX TODO  put the shardAlignment jobFunct here XXX
-
     # handle downloading the error model, use the EM trained model, if we did EM
     if config["EM"] is not None and config["realign"] is not None:
         job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using EM trained error model")
@@ -132,8 +130,12 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
         margin_label = "noMargin" if config["no_margin"] else "margin"
         job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Calling variants with model {model} "
                                   "no margin is {margin}".format(model=config["error_model"], margin=config["no_margin"]))
-        job.addFollowOnJobFn(marginCallerJobFunction, config, input_alignment_fid, margin_label,
-                             disk=(3 * input_alignment_fid.size))
+        sharded_alignments = job.addChildJobFn(shardAlignmentByRegionJobFunction,
+                                               config["reference_FileStoreID"],
+                                               input_alignment_fid,
+                                               config["split_chromosome_this_length"]).rv()
+        job.addFollowOnJobFn(marginCallerJobFunction, config, input_alignment_fid, sharded_alignments,
+                             margin_label, disk=(3 * input_alignment_fid.size))
         return
 
     if config["chain"]:  # variant call the chained alignment
@@ -143,21 +145,32 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
         chained_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
                                                   config["output_dir"] + "{}_chained.bam".format(config["sample_label"]),
                                                   disk=input_alignment_fid.size).rv()
-        job.addFollowOnJobFn(marginCallerJobFunction, chained_config, chained_alignment_fid, "chained")
+        sharded_chained_alignments = job.addChildJobFn(shardAlignmentByRegionJobFunction,
+                                                       config["reference_FileStoreID"],
+                                                       chained_alignment_fid,
+                                                       config["split_chromosome_this_length"]).rv()
+        job.addFollowOnJobFn(marginCallerJobFunction, chained_config, chained_alignment_fid,
+                             sharded_chained_alignments, "chained")
     else:
-        job.addFollowOnJobFn(marginCallerJobFunction, chained_config, input_alignment_fid, "")
+        sharded_alignments = job.addChildJobFn(shardAlignmentByRegionJobFunction,
+                                               config["reference_FileStoreID"],
+                                               input_alignment_fid,
+                                               config["split_chromosome_this_length"]).rv()
+        job.addFollowOnJobFn(marginCallerJobFunction, chained_config, input_alignment_fid, sharded_alignments, "")
 
     if config["realign"]:
         realigned_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
                                                     (config["output_dir"] +
                                                         "{}_realigned.bam".format(config["sample_label"])),
                                                     disk="1G").rv()  # TODO need promised requirement here
-
-        # TODO move the shardAlignmentsByRegion to HERE instead of within marginCallerJobFunction
-        # handle the EM trained (potentially chained) alignment with marginalization in the variant calling
+        sharded_realigned_alignments = job.addChildJobFn(shardAlignmentByRegionJobFunction,
+                                                         config["reference_FileStoreID"],
+                                                         realigned_alignment_fid,
+                                                         config["split_chromosome_this_length"]).rv()
         em_label = "em" if config["EM"] else ""
         realign_em_label = em_label + "Realign" if config["chain"] else em_label + "RealignNoChain"
-        job.addFollowOnJobFn(marginCallerJobFunction, config, realigned_alignment_fid, realign_em_label)
+        job.addFollowOnJobFn(marginCallerJobFunction, config, realigned_alignment_fid, sharded_realigned_alignments,
+                             realign_em_label)
 
         # handle the same alignment without marginalization
         no_margin_config = dict(**config)
@@ -165,7 +178,8 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
         no_margin_config["stats"]     = False  # don't need to redo this
 
         realign_noMargin_label = em_label + "RealignNoMargin" if config["chain"] else em_label + "RealignNoMarginNoChain"
-        job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, realigned_alignment_fid, realign_noMargin_label)
+        job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, realigned_alignment_fid,
+                             sharded_realigned_alignments, realign_noMargin_label)
 
 
 def print_help():
