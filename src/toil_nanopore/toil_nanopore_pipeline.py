@@ -16,7 +16,7 @@ from toil.job import Job
 from toil_lib import UserError, require
 from toil_lib.files import generate_file
 from toil_lib.programs import docker_call
-from margin.toil.localFileManager import LocalFile, urlDownload, urlDownlodJobFunction
+from margin.toil.localFileManager import LocalFile, urlDownload, urlDownlodJobFunction, importToJobstore
 from margin.toil.hmm import Hmm
 from margin.toil.alignment import AlignmentStruct, AlignmentFormat, shardAlignmentByRegionJobFunction
 
@@ -142,9 +142,11 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
         chained_config = dict(**config)
         chained_config["no_margin"] = True
         chained_config["stats"]     = True
-        chained_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
-                                                  config["output_dir"] + "{}_chained.bam".format(config["sample_label"]),
-                                                  disk=input_alignment_fid.size).rv()
+        #chained_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
+        #                                          config["output_dir"] + "{}_chained.bam".format(config["sample_label"]),
+        #                                          disk=input_alignment_fid.size).rv()
+        chained_aln_url            = config["output_dir"] + "{}_chained.bam".format(config["sample_label"])
+        chained_alignment_fid      = importToJobstore(job, chained_aln_url)
         sharded_chained_alignments = job.addChildJobFn(shardAlignmentByRegionJobFunction,
                                                        config["reference_FileStoreID"],
                                                        chained_alignment_fid,
@@ -159,10 +161,12 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
         job.addFollowOnJobFn(marginCallerJobFunction, chained_config, input_alignment_fid, sharded_alignments, "")
 
     if config["realign"]:
-        realigned_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
-                                                    (config["output_dir"] +
-                                                        "{}_realigned.bam".format(config["sample_label"])),
-                                                    disk="1G").rv()  # TODO need promised requirement here
+        #realigned_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
+        #                                            (config["output_dir"] +
+        #                                                "{}_realigned.bam".format(config["sample_label"])),
+        #                                            disk="1G").rv()  # TODO need promised requirement here
+        realigned_alignment_url      = config["output_dir"] + "{}_realigned.bam".format(config["sample_label"])
+        realigned_alignment_fid      = importToJobstore(job, realigned_alignment_url)
         sharded_realigned_alignments = job.addChildJobFn(shardAlignmentByRegionJobFunction,
                                                          config["reference_FileStoreID"],
                                                          realigned_alignment_fid,
