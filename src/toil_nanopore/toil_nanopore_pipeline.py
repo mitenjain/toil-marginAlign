@@ -87,6 +87,9 @@ def run_tool(job, config, sample):
     config["sample_label"]    = sample.label
     config["reference_label"] = config["ref"]
     job.fileStore.logToMaster("[run_tool]Processing sample:{}".format(config["sample_label"]))
+    job.fileStore.logToMaster("[run_tool]Chaining is:{}".format(config["chain"]))
+    job.fileStore.logToMaster("[run_tool]Realign is:{}".format(config["realign"]))
+    job.fileStore.logToMaster("[run_tool]Caller is:{}".format(config["caller"]))
 
     # Pipeline starts here
     job.addFollowOnJobFn(marginAlignJobFunction, config, bwa_alignment_fid)
@@ -109,7 +112,6 @@ def marginAlignJobFunction(job, config, input_alignment_fid):
 
 
 def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
-
     # handle downloading the error model, use the EM trained model, if we did EM
     if config["EM"] is not None and config["realign"] is not None:
         job.fileStore.logToMaster("[callVariantsAndGetStatsJobFunction]Using EM trained error model")
@@ -142,15 +144,12 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
         chained_config = dict(**config)
         chained_config["no_margin"] = True
         chained_config["stats"]     = True
-        #chained_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
-        #                                          config["output_dir"] + "{}_chained.bam".format(config["sample_label"]),
-        #                                          disk=input_alignment_fid.size).rv()
-        chained_aln_url            = config["output_dir"] + "{}_chained.bam".format(config["sample_label"])
-        chained_alignment_fid      = importToJobstore(job, chained_aln_url)
-        sharded_chained_alignments = job.addChildJobFn(shardAlignmentByRegionJobFunction,
-                                                       config["reference_FileStoreID"],
-                                                       chained_alignment_fid,
-                                                       config["split_chromosome_this_length"]).rv()
+        chained_aln_url             = config["output_dir"] + "{}_chained.bam".format(config["sample_label"])
+        chained_alignment_fid       = importToJobstore(job, chained_aln_url)
+        sharded_chained_alignments  = job.addChildJobFn(shardAlignmentByRegionJobFunction,
+                                                        config["reference_FileStoreID"],
+                                                        chained_alignment_fid,
+                                                        config["split_chromosome_this_length"]).rv()
         job.addFollowOnJobFn(marginCallerJobFunction, chained_config, chained_alignment_fid,
                              sharded_chained_alignments, "chained")
     else:
@@ -161,10 +160,6 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
         job.addFollowOnJobFn(marginCallerJobFunction, chained_config, input_alignment_fid, sharded_alignments, "")
 
     if config["realign"]:
-        #realigned_alignment_fid = job.addChildJobFn(urlDownlodJobFunction,
-        #                                            (config["output_dir"] +
-        #                                                "{}_realigned.bam".format(config["sample_label"])),
-        #                                            disk="1G").rv()  # TODO need promised requirement here
         realigned_alignment_url      = config["output_dir"] + "{}_realigned.bam".format(config["sample_label"])
         realigned_alignment_fid      = importToJobstore(job, realigned_alignment_url)
         sharded_realigned_alignments = job.addChildJobFn(shardAlignmentByRegionJobFunction,

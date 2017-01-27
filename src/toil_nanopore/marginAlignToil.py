@@ -40,7 +40,7 @@ def chainSamFileJobFunction(job, config, aln_struct):
         job.fileStore.logToMaster("[chainSamFileJobFunction]Nothing to do.")
         return
 
-    if config["chain"]:
+    if config["chain"] is not None:
         sam_file   = job.fileStore.readGlobalFile(aln_struct.FileStoreID())
         reference  = job.fileStore.readGlobalFile(config["reference_FileStoreID"])
         reads      = job.fileStore.readGlobalFile(config["sample_FileStoreID"])
