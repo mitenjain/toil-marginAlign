@@ -33,5 +33,6 @@ def marginCallerJobFunction(job, config, input_samfile_fid, smaller_alns, output
     job.addFollowOnJobFn(makeVcfFromVariantCallsJobFunction2, config, all_variant_calls, output_label)
 
     if config["stats"]:
-        job.addFollowOnJobFn(marginStatsJobFunction, config, input_samfile_fid, output_label,
-                             memory=input_samfile_fid.size)
+        raise NotImplementedError
+        #job.addFollowOnJobFn(marginStatsJobFunction, config, input_samfile_fid, output_label,
+        #                     memory=input_samfile_fid.size)

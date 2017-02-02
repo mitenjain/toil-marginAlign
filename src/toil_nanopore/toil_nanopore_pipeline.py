@@ -16,9 +16,11 @@ from toil.job import Job
 from toil_lib import UserError, require
 from toil_lib.files import generate_file
 from toil_lib.programs import docker_call
+
 from margin.toil.localFileManager import LocalFile, urlDownload, urlDownlodJobFunction, importToJobstore
 from margin.toil.hmm import Hmm
 from margin.toil.alignment import AlignmentStruct, AlignmentFormat, shardAlignmentByRegionJobFunction
+from margin.toil.stats import collectAlignmentStatsJobFunction
 
 from sample import Sample
 from marginAlignToil import bwaAlignJobFunction, chainSamFileJobFunction
@@ -87,10 +89,10 @@ def run_tool(job, config, sample):
     config["sample_label"]    = sample.label
     config["reference_label"] = config["ref"]
     job.fileStore.logToMaster("[run_tool]Processing sample:{}".format(config["sample_label"]))
-    job.fileStore.logToMaster("[run_tool]Chaining is:{}".format(config["chain"]))
-    job.fileStore.logToMaster("[run_tool]Realign is:{}".format(config["realign"]))
-    job.fileStore.logToMaster("[run_tool]Caller is:{}".format(config["caller"]))
-
+    job.fileStore.logToMaster("[run_tool]Chaining   :{}".format(config["chain"]))
+    job.fileStore.logToMaster("[run_tool]Realign    :{}".format(config["realign"]))
+    job.fileStore.logToMaster("[run_tool]Caller     :{}".format(config["caller"]))
+    job.fileStore.logToMaster("[run_tool]Stats      :{}".format(config["stats"]))
     # Pipeline starts here
     job.addFollowOnJobFn(marginAlignJobFunction, config, bwa_alignment_fid)
 
@@ -108,8 +110,7 @@ def marginAlignJobFunction(job, config, input_alignment_fid):
         job.addFollowOnJobFn(callVariantsAndGetStatsJobFunction, config, input_alignment_fid)
         return
     if config["stats"]:
-        require(False, "-->Art still needs to put the correct function here")
-
+        job.addFollowOnJobFn(collectAlignmentStatsJobFunction, config, input_alignment_fid, config["sample_label"])
 
 def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
     # handle downloading the error model, use the EM trained model, if we did EM
@@ -276,6 +277,7 @@ def generateConfig():
         ## MarginStats Options ##
         ##---------------------##
         # all options are required, and have defaults except the output URL
+        stats_alignment_batch_size: 100
         local_alignment:            False
         noStats:                    False
         printValuePerReadAlignment: True
@@ -323,8 +325,7 @@ def parseManifest(path_to_manifest):
         # double check input, shouldn't need to though
         require(not line.isspace() and not line.startswith("#"), "[parse_line]Invalid {}".format(line))
         sample = line.strip().split("\t")
-        # there should only be two entries, the file_type and the URL
-        require(len(sample) == 4, "[parse_line]Invalid, len(line) != 3, offending {}".format(line))
+        require(len(sample) == 4, "[parse_line]Invalid, len(line) != 4, offending {}".format(line))
         file_type, sample_url, sample_label, sample_filesize = sample
         # check the file_type and the URL
         require(file_type in allowed_file_types, "[parse_line]Unrecognized file type {}".format(file_type))
