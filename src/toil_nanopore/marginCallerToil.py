@@ -26,6 +26,9 @@ def marginCallerJobFunction(job, config, input_samfile_fid, smaller_alns, output
                                           config, aln, hidden_markov_model,
                                           calculateAlignedPairsJobFunction,
                                           marginalizePosteriorProbsJobFunction,
+                                          batch_disk=disk,
+                                          followOn_disk=(2 * config["reference_FileStoreID"].size),
+                                          followOn_mem=(6 * aln.FileStoreID.size),
                                           disk=disk, memory=memory).rv()
         all_variant_calls.append(variant_calls)
         count += 1
