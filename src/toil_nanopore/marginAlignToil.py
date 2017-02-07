@@ -59,15 +59,15 @@ def chainSamFileJobFunction(job, config, aln_struct):
 
         chainedSamFileId = job.fileStore.writeGlobalFile(output_sam.fullpathGetter())
         deliverOutput(job, output_sam, config["output_dir"])
-        job.addFollowOnJobFn(realignJobFunction, config, chainedSamFileId)
+        job.addFollowOnJobFn(realignmentRootJobFunction, config, chainedSamFileId)
 
     else:
-        job.fileStore.logToMaster("[chainSamFileJobFunction]Not chaining SAM, passing {sam} "
-                                  "on to realignment".format(sam=aln_struct.FileStoreID()))
-        job.addFollowOnJobFn(realignJobFunction, config, aln_struct.FileStoreID())
+        job.fileStore.logToMaster("[chainSamFileJobFunction]Not chaining SAM, passing alignment "
+                                  "on to realignment")
+        job.addFollowOnJobFn(realignmentRootJobFunction, config, aln_struct.FileStoreID())
 
 
-def realignJobFunction(job, config, input_samfile_fid):
+def realignmentRootJobFunction(job, config, input_samfile_fid):
     if config["realign"] is None:  # the chained SAM has already been delivered
         return
     if config["EM"]:
@@ -80,8 +80,6 @@ def realignJobFunction(job, config, input_samfile_fid):
                                       reference=config["reference_label"]))
         job.addChildJobFn(performBaumWelchOnSamJobFunction, config, input_samfile_fid)
 
-    # need disk = ref_size + bam_size
-    # memory = ref_size(hash) + sam
     job.fileStore.logToMaster("[realignJobFunction]Queueing up HMM realignment")
     realign_label = "realigned" if config["chain"] else "noChain_realigned"
     return job.addFollowOnJobFn(realignSamFileJobFunction, config, input_samfile_fid, realign_label).rv()

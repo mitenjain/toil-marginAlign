@@ -52,7 +52,7 @@ def getFastqFromBam(job, bam_sample, samtools_image="quay.io/ucsc_cgl/samtools")
     return job.fileStore.writeGlobalFile(fastq_reads.fullpathGetter())
 
 
-def run_tool(job, config, sample):
+def marginAlignRootJobFunction(job, config, sample):
     def cull_sample_files():
         if sample.file_type == "fq":
             config["sample_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction, sample.URL, disk=sample.file_size).rv()
@@ -62,13 +62,13 @@ def run_tool(job, config, sample):
             config["sample_FileStoreID"] = job.addChildJobFn(getFastqFromBam, sample, disk=(2 * sample.file_size)).rv()
             return bwa_alignment_fid
         else:
-            require(False, "[cull_sample_files]Unsupported file type {}".format(sample.file_type))
+            raise RuntimeError("[marginAlignRootJobFunction]Unsupported sample file type %s" % sample.file_type)
 
-    # download the reference
+    # download/import the reference
     config["reference_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction, config["ref"], disk=config["ref_size"]).rv()
 
-    # cull the sample, which can be a fastq or a BAM
-    bwa_alignment_fid = cull_sample_files()
+    # cull the sample, which can be a fastq or a BAM this will be None if we are doing BWA alignment
+    alignment_fid = cull_sample_files()
 
     # checks if we're doing alignments or variant calling
     if config["realign"] or config["caller"]:
@@ -78,8 +78,8 @@ def run_tool(job, config, sample):
             config["input_hmm_FileStoreID"] = job.addChildJobFn(urlDownlodJobFunction, config["hmm_file"], disk="10M").rv()
         else:
             if config["realign"]:
-                require(config["EM"], "[run_tool]Need to specify an input model or set EM to "
-                                      "True to perform HMM realignment")
+                require(config["EM"], "[marginAlignRootJobFunction]Need to specify an input model or "
+                                      "set EM to True to perform HMM realignment")
             config["input_hmm_FileStoreID"] = None
 
         # initialize key in config for trained model if we're performing EM
@@ -88,29 +88,32 @@ def run_tool(job, config, sample):
 
     config["sample_label"]    = sample.label
     config["reference_label"] = config["ref"]
+
     job.fileStore.logToMaster("[run_tool]Processing sample:{}".format(config["sample_label"]))
     job.fileStore.logToMaster("[run_tool]Chaining   :{}".format(config["chain"]))
     job.fileStore.logToMaster("[run_tool]Realign    :{}".format(config["realign"]))
     job.fileStore.logToMaster("[run_tool]Caller     :{}".format(config["caller"]))
     job.fileStore.logToMaster("[run_tool]Stats      :{}".format(config["stats"]))
-    # Pipeline starts here
-    job.addFollowOnJobFn(marginAlignJobFunction, config, bwa_alignment_fid)
+
+    job.addFollowOnJobFn(marginAlignJobFunction, config, alignment_fid)
 
 
 def marginAlignJobFunction(job, config, input_alignment_fid):
-    if config["realign"] or config["chain"]:  # perform EM/Alignment/chaining if we're doing that
+    if config["realign"] or config["chain"]:  # perform EM/Alignment/chaining
         if input_alignment_fid is None:
-            job.addChildJobFn(bwaAlignJobFunction, config)
+            job.addChildJobFn(bwaAlignJobFunction, config)  # this passes on to the chainSam...
         else:
             aln_struct = AlignmentStruct(input_alignment_fid, AlignmentFormat.BAM)
-            job.fileStore.logToMaster("[marginAlignJobFunction]Asking for {} memory".format(6 * input_alignment_fid.size))
             job.addChildJobFn(chainSamFileJobFunction, config, aln_struct, memory=(6 * input_alignment_fid.size))
 
+    # TODO work out the logic here, we want to be able to get stats on an input alignment, but we don't want to
+    # just get stats on the input if we're realigning...
     if config["caller"]:
         job.addFollowOnJobFn(callVariantsAndGetStatsJobFunction, config, input_alignment_fid)
         return
     if config["stats"]:
         job.addFollowOnJobFn(collectAlignmentStatsJobFunction, config, input_alignment_fid, config["sample_label"])
+
 
 def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
     # handle downloading the error model, use the EM trained model, if we did EM
@@ -142,7 +145,7 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
         return
 
     if config["chain"]:  # variant call the chained alignment
-        chained_config = dict(**config)
+        chained_config              = dict(**config)  # copy constructor
         chained_config["no_margin"] = True
         chained_config["stats"]     = True
         chained_aln_url             = config["output_dir"] + "{}_chained.bam".format(config["sample_label"])
@@ -153,7 +156,7 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
                                                         config["split_chromosome_this_length"]).rv()
         job.addFollowOnJobFn(marginCallerJobFunction, chained_config, chained_alignment_fid,
                              sharded_chained_alignments, "chained")
-    else:
+    else:  # variant call the input alignment
         sharded_alignments = job.addChildJobFn(shardAlignmentByRegionJobFunction,
                                                config["reference_FileStoreID"],
                                                input_alignment_fid,
@@ -167,15 +170,15 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
                                                          config["reference_FileStoreID"],
                                                          realigned_alignment_fid,
                                                          config["split_chromosome_this_length"]).rv()
-        em_label = "em" if config["EM"] else ""
+        em_label         = "em" if config["EM"] else ""
         realign_em_label = em_label + "Realign" if config["chain"] else em_label + "RealignNoChain"
         job.addFollowOnJobFn(marginCallerJobFunction, config, realigned_alignment_fid, sharded_realigned_alignments,
                              realign_em_label)
 
         # handle the same alignment without marginalization
-        no_margin_config = dict(**config)
+        no_margin_config              = dict(**config)
         no_margin_config["no_margin"] = True
-        no_margin_config["stats"]     = False  # don't need to redo this
+        no_margin_config["stats"]     = False  # don't need to redo stats
 
         realign_noMargin_label = em_label + "RealignNoMargin" if config["chain"] else em_label + "RealignNoMarginNoChain"
         job.addFollowOnJobFn(marginCallerJobFunction, no_margin_config, realigned_alignment_fid,
@@ -183,7 +186,7 @@ def callVariantsAndGetStatsJobFunction(job, config, input_alignment_fid):
 
 
 def print_help():
-    """this is the help, add something helpful here soon...very soon
+    """run toil-nanopore generate and look at the config file for help.
     """
     return print_help.__doc__
 
@@ -198,7 +201,7 @@ def generateConfig():
         # Local inputs follow the URL convention: file:///full/path/to/input
         # S3 URLs follow the convention: s3://bucket/directory/file.txt
         #
-        # some options have been filled in with defaults
+        # some options have been filled in with defaults and examples
 
         ## Universal Options/Inputs ##
         # Required: Which subprograms to run, typically you run all 4, but you can run them piecemeal if you like
@@ -207,17 +210,47 @@ def generateConfig():
         realign: True
         caller:  True
         stats:   True
-
-        # Optional: set true to do EM
         EM:      True
-
-        # Required: Reference fasta file
-        ref:      s3://arand-sandbox/references.fa
-        ref_size: 10M
 
         # Required: output directory for results to land in
         # Warning: S3 buckets must exist prior to upload or it will fail.
         output_dir: s3://arand-sandbox/
+
+        # Required:
+        #   ref:      URL for reference FASTA
+        #   ref_size: the approx size of the input FASTA (used for resource allocation)
+        ref:      s3://arand-sandbox/references.fa
+        ref_size: 10M
+
+
+        ##---------------------------##
+        ## batching/sharding options ##
+        ##---------------------------##
+        # WARNING: only change the values below if you know what you're doing
+        #   ---# These options change how the input alignment is broken up #---
+        #   split_chromosome_this_length:  used by: marginCaller, devides the alignment into pieces that align to
+        #                                  regions of the chromosome that are this long, the smaller this length the
+        #                                  faster variant calling will be, but there will be more I/O to get there
+        #   split_alignments_to_this_many: used by: marginAlign, shards the input alignment into
+        #                                  smaller alignments that have this many AlignedSegments in them
+        #   stats_alignment_batch_size:    used by: marginStats. same as `split_alignments_to_this_many` but
+        #                                  for marginStats
+        #
+        #   --# These options change how the alignment jobs are spawned, used by marginAlign and marginCaller #---
+        #   max_alignment_length_per_job:    used by: marginAlign and marginCaller, makes a batch of alignments when
+        #                                    the total alignment length reaches this number
+        #   max_alignments_per_job:          used by marginAlign and marginCaller, same as max_alignment_length_per_job,
+        #                                    but for number of AlignedSegments
+        #   cut_batch_at_alignment_this_big: makes a new batch then it reaches an AlignedSegment that is >= this length
+
+        split_alignments_to_this_many:   1000
+        split_chromosome_this_length:    1000000
+        stats_alignment_batch_size:      100
+        max_alignment_length_per_job:    700000
+        max_alignments_per_job:          300
+        cut_batch_at_alignment_this_big: 20000
+
+
 
         ##---------------------##
         ## MarginAlign Options ##
@@ -226,15 +259,7 @@ def generateConfig():
         gap_gamma:   0.5
         match_gamma: 0.0
 
-        # batching/sharding options, only change the values below if you know what you're doing
-        # total length (in nucleotides) that will be assigned to an HMM alignment job
-        split_chromosome_this_length:    1000000
-        split_alignments_to_this_many:   1000
-        max_alignment_length_per_job:    700000
-        max_alignments_per_job:          300
-        cut_batch_at_alignment_this_big: 20000
-
-        # Optional: Alignment Model, n.b. this is required if you do not perform EM
+        # Optional: Alignment Model, n.b. this is REQUIRED if you do not perform EM
         hmm_file: s3://arand-sandbox/last_hmm_20.txt
 
         #------------#
@@ -242,15 +267,16 @@ def generateConfig():
         #------------#
 
         # Model-related options
-        # if no input model is set, make this kind of model
-        # choices: fiveState, fiveStateAsymmetric, threeState, threeStateAsymmetric
-        model_type: fiveState
-        # randomly sample this amount of bases for EM
-        max_sample_alignment_length: 50000
+        #                    model_type: if no input model is set, make this kind of model
+        #                                choices: fiveState, fiveStateAsymmetric, threeState,
+        #                                       threeStateAsymmetric
+        #   max_sample_alignment_length: randomly sample this amount of bases for EM
+        #                 em_iterations: number of full cycles to train on the given sample amount
+        #       n.b random start with searching for best model is not *quite* implemented yet
 
-        # perform this number of EM iterations
+        model_type: fiveState
+        max_sample_alignment_length: 50000
         em_iterations: 5
-        # n.b random start with searching for best model is not *quite* implemented yet
         random_start:  False
 
         # set_Jukes_Cantor_emissions is of type Float or blank (None)
@@ -264,12 +290,10 @@ def generateConfig():
         ## MarginCaller Options ##
         ##----------------------##
         # Required: Error model
+        #   no_margin: disables marginalization when calling vairants, with/without are performed
+        #              by default when all subprograms are run when 'caller' is run alone this
+        #              option will be used
         error_model: s3://arand-sandbox/last_hmm_20.txt
-
-        # batch/sharding option, smaller numbers will spawn large numbers of jobs
-        max_variant_call_positions_per_job: 100000
-        # Options
-        # no_margin option, don't change unless you're only doing variant calling
         no_margin: False
         variant_threshold: 0.3
 
@@ -277,16 +301,7 @@ def generateConfig():
         ## MarginStats Options ##
         ##---------------------##
         # all options are required, and have defaults except the output URL
-        stats_alignment_batch_size: 100
         local_alignment:            False
-        noStats:                    False
-        printValuePerReadAlignment: True
-        identity:                   True
-        readCoverage:               True
-        mismatchesPerAlignedBase:   True
-        deletionsPerReadBase:       True
-        insertionsPerReadBase:      True
-        readLength:                 True
 
         # Optional: Debug increasing logging
         debug: True
@@ -337,16 +352,14 @@ def parseManifest(path_to_manifest):
 
 
 def main():
-    """toil-nanopore master script
-    """
     def parse_args():
         parser = argparse.ArgumentParser(description=print_help.__doc__,
                                          formatter_class=argparse.RawTextHelpFormatter)
         subparsers = parser.add_subparsers(dest="command")
-        run_parser = subparsers.add_parser("run", help="runs nanopore pipeline with config")
-        subparsers.add_parser("generate", help="generates a config file for your run, do this first")
-
-        run_parser.add_argument('--config', default='config-toil-nanopore.yaml', type=str,
+        run_parser = subparsers.add_parser("run",
+                                           help="runs nanopore pipeline with config on samples in manifest")
+        subparsers.add_parser("generate", help="generates config and manifest files for your run, do this first")
+        run_parser.add_argument("--config", default="config-toil-nanopore.yaml", type=str,
                                 help='Path to the (filled in) config file, generated with "generate".')
         run_parser.add_argument('--manifest', default='manifest-toil-nanopore.tsv', type=str,
                                 help='Path to the (filled in) manifest file, generated with "generate". '
@@ -388,7 +401,7 @@ def main():
         for sample in samples:
             with Toil(args) as toil:
                 if not toil.options.restart:
-                    root_job = Job.wrapJobFn(run_tool, config, sample)
+                    root_job = Job.wrapJobFn(marginAlignRootJobFunction, config, sample)
                     return toil.start(root_job)
                 else:
                     toil.restart()
