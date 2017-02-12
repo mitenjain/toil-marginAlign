@@ -1,8 +1,10 @@
 """JobWrappingJobFunctions for marginCaller
 """
 from __future__ import print_function
+
 from itertools import chain
-from margin.toil.realign import shardSamJobFunction
+
+from margin.toil.shardAlignment import shardSamJobFunction
 from margin.toil.variantCaller import\
     calculateAlignedPairsJobFunction,\
     marginalizePosteriorProbsJobFunction
